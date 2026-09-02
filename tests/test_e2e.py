@@ -132,7 +132,7 @@ class TestEnterpriseSalesFlow:
             approved_draft=draft,
             recipient_email="cto@bigcorp.com",
             approver_identity="sales_lead@beda.studio",
-            payload_hash=payload_hash,
+            expected_payload_hash=payload_hash,
         )
 
         result = mock_dispatch(command, audit_sink=audit_sink)
@@ -202,7 +202,7 @@ class TestReplayedApproval:
             approved_draft=draft,
             recipient_email="client@example.com",
             approver_identity="admin@beda.studio",
-            payload_hash=payload_hash,
+            expected_payload_hash=payload_hash,
         )
 
         # First dispatch succeeds.

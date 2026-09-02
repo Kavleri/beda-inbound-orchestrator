@@ -1,0 +1,40 @@
+```mermaid
+flowchart LR
+    Webhook[External Webhooks<br/>Email / Webform / IM<br/>external]
+    Ingress[FastAPI Ingress Gateway<br/>HMAC verify + PII redaction<br/>design-only]
+    Queue[(Celery + Redis Broker<br/>async task queue<br/>design-only)]
+    Extractor[External LLM Extractor<br/>Claude / GPT JSON mode<br/>design-only]
+    Policy[Deterministic Policy Engine<br/>implemented locally]
+    CRM[(PostgreSQL + pgvector CRM<br/>dedup + account enrichment<br/>design-only)]
+    Slack[Slack Interactive HITL<br/>Block Kit approval UI<br/>design-only]
+    Approval[ApprovalCommand Generator<br/>HMAC-SHA256 signature<br/>implemented locally]
+    Dispatcher[Outbound SMTP / API Dispatcher<br/>SendGrid / SES client<br/>design-only]
+    AuditStore[(PostgreSQL Audit Ledger<br/>append-only table<br/>design-only)]
+    DLQ[(Dead-Letter Queue / DLQ<br/>design-only)]
+
+    Webhook -->|HTTPS POST| Ingress
+    Ingress -->|rejected| DLQ
+    Ingress -->|InboundEnvelope| Queue
+    Queue --> Extractor
+    Extractor -->|InboundTriageResult| Policy
+    Policy -->|CRM candidate| CRM
+    CRM -->|enriched lead| Slack
+    Policy -->|spam / injection / low confidence| DLQ
+    Slack -->|human sign-off| Approval
+    Approval -->|verified command| Dispatcher
+    Dispatcher -->|sent email| AuditStore
+    Dispatcher -->|provider failure| DLQ
+
+    Ingress -.-> AuditStore
+    Policy -.-> AuditStore
+    Approval -.-> AuditStore
+    DLQ -.-> AuditStore
+
+    classDef implemented fill:#eef6ff,stroke:#2563eb,color:#111827;
+    classDef designOnly fill:#f8fafc,stroke:#64748b,color:#111827,stroke-dasharray:4 3;
+    classDef failure fill:#fff7ed,stroke:#c2410c,color:#111827;
+
+    class Policy,Approval implemented;
+    class Ingress,Queue,Extractor,CRM,Slack,Dispatcher,AuditStore designOnly;
+    class DLQ failure;
+```

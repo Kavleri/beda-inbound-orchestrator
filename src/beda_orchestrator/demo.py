@@ -149,7 +149,7 @@ def run_demo() -> None:
         approved_draft=approved_draft,
         recipient_email="cto@megacorp.com",
         approver_identity="sales_lead@beda.studio",
-        payload_hash=payload_hash,
+        expected_payload_hash=payload_hash,
     )
 
     result2 = mock_dispatch(command2, audit_sink=audit_sink)

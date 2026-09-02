@@ -1,0 +1,34 @@
+```mermaid
+flowchart LR
+    Client[Inbound Caller / Test Runner]
+    Envelope[InboundEnvelope<br/>transport metadata]
+    Triage[Mock Triage Extractor<br/>InboundTriageResult]
+    Policy[Deterministic Policy Engine<br/>evaluate_triage_decision]
+    Decision[RoutingDecision<br/>action + reason_code]
+    Human[Human Approver<br/>approve_and_send]
+    Command[ApprovalCommand<br/>HMAC + nonce + expiry]
+    Dispatcher[Mock Dispatcher<br/>verify_approval + send]
+    AuditSink[(AuditSink<br/>append-only JSONL + hash chain)]
+    Quarantine[(Quarantine / Archive State)]
+
+    Client -->|validates| Envelope
+    Envelope --> Triage
+    Triage --> Policy
+    Envelope --> Policy
+    Policy -->|requires_human_approval = true| Decision
+    Policy -->|spam / injection / contradictory| Quarantine
+    Decision --> Human
+    Human -->|issues verified token| Command
+    Command --> Dispatcher
+    Dispatcher -->|dispatched| AuditSink
+    Policy -.->|audit event| AuditSink
+    Quarantine -.->|audit event| AuditSink
+    Dispatcher -.->|failure event| AuditSink
+
+    classDef implemented fill:#eef6ff,stroke:#2563eb,color:#111827;
+    classDef terminal fill:#ecfdf5,stroke:#047857,color:#111827;
+    classDef quarantine fill:#fff7ed,stroke:#c2410c,color:#111827;
+
+    class Envelope,Triage,Policy,Decision,Human,Command,Dispatcher,AuditSink implemented;
+    class Quarantine quarantine;
+```

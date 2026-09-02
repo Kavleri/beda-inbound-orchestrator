@@ -1,14 +1,25 @@
 """
-Tests for domain model validation and trust boundary enforcement.
+Tests for domain model validation, immutability, and trust boundary enforcement.
 
-Covers: unknown fields, invalid enums, invalid confidence, overlong strings,
-malformed email, bad channel, and injection detection in company name.
+Covers:
+  - InboundEnvelope validation, normalization, and timezone checks
+  - InboundTriageResult bounds, sanitization, and immutability
+  - RoutingDecision frozenness and timezone validation
+  - ApprovalCommand bounds, signature length, and timezone-aware expiry
 """
+
+from datetime import datetime, timezone
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
-from beda_orchestrator.enums import InquiryIntent, UrgencyLevel
+from beda_orchestrator.enums import (
+    InquiryIntent,
+    ReasonCode,
+    RoutingAction,
+    UrgencyLevel,
+)
 from beda_orchestrator.models import (
     ApprovalCommand,
     InboundEnvelope,
@@ -47,6 +58,10 @@ class TestInboundEnvelope:
     def test_rejects_invalid_channel(self):
         with pytest.raises(ValidationError, match="pattern"):
             make_envelope(source_channel="telegram")
+
+    def test_rejects_timezone_naive_received_at(self):
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            make_envelope(received_at=datetime(2026, 1, 1, 12, 0, 0))
 
     def test_rejects_unknown_fields(self):
         with pytest.raises(ValidationError, match="extra"):
@@ -122,3 +137,80 @@ class TestInboundTriageResult:
         t = make_triage()
         with pytest.raises(ValidationError):
             t.confidence_score = 0.5
+
+
+class TestRoutingDecisionModel:
+    def test_valid_decision(self):
+        d = RoutingDecision(
+            event_id=uuid4(),
+            triage_id=uuid4(),
+            idempotency_key="k" * 32,
+            action=RoutingAction.QUEUE_FOR_HITL_DRAFT_REVIEW,
+            target_queue="hitl_standard",
+            requires_human_approval=True,
+            reason_code=ReasonCode.STANDARD_HITL_REVIEW,
+            reason_detail="Standard review.",
+        )
+        assert d.requires_human_approval is True
+        assert d.policy_version == "0.1.0"
+
+    def test_rejects_extra_fields(self):
+        with pytest.raises(ValidationError, match="extra"):
+            RoutingDecision(
+                event_id=uuid4(),
+                triage_id=uuid4(),
+                idempotency_key="k" * 32,
+                action=RoutingAction.QUEUE_FOR_HITL_DRAFT_REVIEW,
+                target_queue="hitl_standard",
+                requires_human_approval=True,
+                reason_code=ReasonCode.STANDARD_HITL_REVIEW,
+                reason_detail="Standard review.",
+                illegal_extra="should_fail",
+            )
+
+    def test_rejects_timezone_naive_evaluated_at(self):
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            RoutingDecision(
+                event_id=uuid4(),
+                triage_id=uuid4(),
+                idempotency_key="k" * 32,
+                action=RoutingAction.QUEUE_FOR_HITL_DRAFT_REVIEW,
+                target_queue="hitl_standard",
+                requires_human_approval=True,
+                reason_code=ReasonCode.STANDARD_HITL_REVIEW,
+                reason_detail="Standard review.",
+                evaluated_at=datetime(2026, 1, 1, 12, 0, 0),
+            )
+
+
+class TestApprovalCommandModel:
+    def test_rejects_extra_fields(self):
+        with pytest.raises(ValidationError, match="extra"):
+            ApprovalCommand(
+                approval_id=uuid4(),
+                decision_id=uuid4(),
+                event_id=uuid4(),
+                payload_hash="a" * 64,
+                recipient_hash="b" * 64,
+                approver_identity="user@beda.studio",
+                approved_draft="Draft text.",
+                nonce="c" * 32,
+                expires_at=datetime.now(timezone.utc),
+                signature="d" * 64,
+                extra_param="forbidden",
+            )
+
+    def test_rejects_timezone_naive_expires_at(self):
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            ApprovalCommand(
+                approval_id=uuid4(),
+                decision_id=uuid4(),
+                event_id=uuid4(),
+                payload_hash="a" * 64,
+                recipient_hash="b" * 64,
+                approver_identity="user@beda.studio",
+                approved_draft="Draft text.",
+                nonce="c" * 32,
+                expires_at=datetime(2026, 1, 1, 12, 0, 0),  # Naive
+                signature="d" * 64,
+            )

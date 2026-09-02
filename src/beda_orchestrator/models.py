@@ -76,6 +76,13 @@ class InboundEnvelope(BaseModel):
     def strip_whitespace(cls, v: str) -> str:
         return v.strip()
 
+    @field_validator("received_at")
+    @classmethod
+    def validate_received_at_tz(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("received_at must be timezone-aware (e.g., UTC).")
+        return v
+
     def body_hash(self) -> str:
         """SHA-256 of the raw body for audit correlation without storing PII."""
         return hashlib.sha256(self.body.encode()).hexdigest()
@@ -158,6 +165,13 @@ class RoutingDecision(BaseModel):
     policy_version: str = POLICY_VERSION
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    @field_validator("evaluated_at")
+    @classmethod
+    def validate_evaluated_at_tz(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("evaluated_at must be timezone-aware (e.g., UTC).")
+        return v
+
 
 # ---------------------------------------------------------------------------
 # ApprovalCommand — bounded, expiring human authorization
@@ -186,11 +200,15 @@ class ApprovalCommand(BaseModel):
     signature: str = Field(..., min_length=64, max_length=128)
     issued_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    @model_validator(mode="after")
-    def expiry_must_be_future_at_creation(self) -> "ApprovalCommand":
-        # We allow construction with past expiry for testing replay rejection.
-        return self
+    @field_validator("expires_at", "issued_at")
+    @classmethod
+    def validate_tz_aware(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("Datetime must be timezone-aware (e.g., UTC).")
+        return v
 
     def is_expired(self, now: datetime | None = None) -> bool:
         now = now or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            raise ValueError("Comparison datetime 'now' must be timezone-aware.")
         return now >= self.expires_at

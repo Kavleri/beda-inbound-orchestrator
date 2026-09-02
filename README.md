@@ -1,258 +1,266 @@
-# BEDA Inbound Business Inquiry Router & Orchestrator
+# BEDA Inbound Inquiry Router & Orchestrator
 
-Reference implementation of an inbound business inquiry router with deterministic policy evaluation and human-in-the-loop approval enforcement.
-
-BEDA receives business inquiries through email, website forms, and messaging channels. Incoming information is inconsistent: some are valuable sales opportunities, some are support questions, some are junk, and some lack enough information to make a decision. This system ingests those inquiries, classifies them, extracts structured data, routes them through a deterministic policy engine, and holds all consequential actions for human approval.
-
-**What this repository implements locally:**
-- Pydantic v2 domain models with strict trust boundaries
-- A deterministic policy engine (pure function, no side effects)
-- HMAC-SHA256 approval tokens with expiry and replay prevention
-- An append-only JSONL audit sink with hash-chain verification
-- A mock dispatcher that accepts only verified approval commands
-- 60 unit and integration tests, all passing without external dependencies
-- A demo that runs five scenarios end-to-end
-
-**What this repository does not implement:**
-FastAPI server, Celery/Redis queues, PostgreSQL/pgvector storage, CRM reconciliation, PII redaction, external LLM calls, Slack approval UI, or SMTP dispatch. These are documented as design boundaries. See [`docs/implementation-status.md`](docs/implementation-status.md).
+This repository is a dependency-light local reference implementation of the decision and approval boundary for an inbound inquiry router. It runs without external services. Infrastructure integrations are design boundaries, not implemented features.
 
 ---
 
-## Quickstart
+## 1. Local Implementation Scope
 
-Requirements: Python >= 3.12, pydantic >= 2.7. No other dependencies needed.
+The local implementation provides a self-contained vertical slice focusing on data validation, deterministic routing policy, cryptographic human approval enforcement, and verifiable audit logging:
+
+- **Strict domain validation (`models.py`):** Pydantic v2 models with `extra="forbid"`, frozen state mutation guards, timezone-aware datetime validation, and bounds on all fields.
+- **Deterministic policy engine (`policy.py`):** Pure function evaluating untrusted extraction results against a 7-rule precedence table with stable reason codes. Lead tier is deterministically recomputed from normalized budget.
+- **Cryptographic approval gate (`approval.py`):** HMAC-SHA256 tokens binding the approved draft, normalized recipient, decision ID, and single-use nonce. Enforces strict approval eligibility and internal payload hash computation.
+- **Append-only audit sink (`audit.py`):** Canonical JSON Lines logger with SHA-256 hash chaining and chain verification. Truncates sensitive details and excludes raw inquiry bodies.
+- **Safe mock dispatcher (`dispatch.py`):** Accepts only verified `ApprovalCommand` objects. Rejects direct model outputs, expired tokens, and replayed nonces.
+
+---
+
+## 2. Non-Implemented Design Boundaries
+
+To maintain testability and eliminate external network dependencies, the following components are modeled as design boundaries:
+
+| Component | Nature of Boundary | Target Implementation Architecture |
+|---|---|---|
+| **HTTP Gateway** | Design boundary | FastAPI edge endpoint with HMAC webhook verification and IP rate limiting. |
+| **Task Broker** | Design boundary | Celery workers backed by Redis for asynchronous queueing and dead-letter buffering. |
+| **Relational Storage** | Design boundary | PostgreSQL 16 for CRM state, accounts, and transactional inquiry tracking. |
+| **Vector Search** | Design boundary | `pgvector` HNSW indexing for semantic duplicate detection and FAQ matching. |
+| **LLM Inference** | Design boundary | Claude / GPT API calls with JSON Schema enforcement and schema retry logic. |
+| **PII Redactor** | Design boundary | Presidio NLP analyzer for masking named entities before external inference calls. |
+| **Approval Interface** | Design boundary | Interactive Slack Block Kit action endpoints delivering signed callback payloads. |
+| **Outbound SMTP/API** | Design boundary | Rate-limited SendGrid / SES client using provider-side idempotency keys. |
+| **Distributed Replay** | Design boundary | Redis atomic `SET key value NX EX <ttl>` for cluster-wide nonce deduplication. |
+
+See [`docs/implementation-status.md`](docs/implementation-status.md) for full traceability.
+
+---
+
+## 3. Quickstart
+
+### Linux / macOS
 
 ```bash
-# Clone and set up
-git clone https://github.com/Kavleri/beda-inbound-orchestrator.git
-cd beda-inbound-orchestrator
+# 1. Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Install (only pydantic is required at runtime)
-pip install pydantic>=2.7.0
-pip install pytest  # for running tests
+# 2. Install package in editable mode with development dependencies
+pip install -e '.[dev]'
 
-# Run the tests
-python -m pytest tests/ -v
+# 3. Generate a 32-byte secret key and export to environment
+export BEDA_APPROVAL_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 
-# Run the local demo
-set BEDA_APPROVAL_SECRET=demo_secret_change_me_in_production_32chars  # Windows
-# export BEDA_APPROVAL_SECRET=demo_secret_change_me_in_production_32chars  # Linux/macOS
-set PYTHONPATH=src
+# 4. Run test suite
+pytest -q
+
+# 5. Execute local demo
+python3 -m beda_orchestrator.demo
+```
+
+### Windows (PowerShell)
+
+```powershell
+# 1. Create and activate virtual environment
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# 2. Install package in editable mode with development dependencies
+pip install -e '.[dev]'
+
+# 3. Set approval secret in current shell session
+$env:BEDA_APPROVAL_SECRET = (python -c "import secrets; print(secrets.token_hex(32))")
+
+# 4. Run test suite
+pytest -q
+
+# 5. Execute local demo
 python -m beda_orchestrator.demo
 ```
 
-Expected demo output shows five scenarios: a support inquiry held for review, an enterprise sales lead approved and dispatched, a quarantined prompt injection, a duplicate event returning the prior decision, and a replayed approval token that is rejected.
+---
+
+## 4. Demo Scenarios & Expected Outcomes
+
+Running `python -m beda_orchestrator.demo` executes five sequential scenarios against the reference implementation:
+
+1. **Standard Support Inquiry:** Valid inquiry routed to `queue_for_hitl_draft_review` with reason code `standard_hitl_review`. Held for review; draft is not dispatched.
+2. **Enterprise Sales Lead:** Enterprise budget ($150,000) evaluated by policy engine -> routed to `escalate_to_human_sales`. Human reviewer executes `approve_and_send()` -> valid `ApprovalCommand` generated -> mock dispatch executes and records audit event.
+3. **Prompt Injection in LLM Output:** Extracted draft contains `"ignore previous instructions..."` -> policy engine quarantines payload with reason code `prompt_injection_detected`. Dispatch is blocked.
+4. **Duplicate Submission:** Resubmitting an identical idempotency key detects previous execution -> returns cached decision without re-running policy logic.
+5. **Replayed Approval Token:** Attempting to reuse the approval command from Scenario 2 fails verification with `APPROVAL_REPLAY_REJECTED` due to nonce exhaustion.
+6. **Audit Verification:** The audit file (`demo_audit.jsonl`) verifies its cryptographic SHA-256 hash chain from the genesis block across all logged events.
 
 ---
 
-## Repository Layout
+## 5. Repository Layout
 
 ```
 beda-inbound-orchestrator/
-  src/beda_orchestrator/
-    __init__.py
-    enums.py         # Domain enums: InquiryIntent, RoutingAction, ReasonCode, etc.
-    models.py        # Domain models: InboundEnvelope, InboundTriageResult,
-                     #   RoutingDecision, ApprovalCommand
-    policy.py        # Deterministic policy engine (pure function)
-    approval.py      # HMAC-SHA256 token issuance, verification, replay prevention
-    audit.py         # Append-only JSONL sink with hash chaining
-    dispatch.py      # Mock dispatcher and idempotency registry
-    demo.py          # Local demo runner (5 scenarios)
-  tests/
-    helpers.py       # Test factories: make_envelope(), make_triage()
-    test_models.py   # Model validation edge cases (11 tests)
-    test_policy.py   # Policy engine rules and precedence (19 tests)
-    test_approval.py # Token issuance, mutation, expiry, replay (8 tests)
-    test_audit.py    # Audit sink, chain integrity, tampering (6 tests)
-    test_e2e.py      # End-to-end vertical slice (6 tests + 10 sub-scenarios)
-  docs/
-    implementation-status.md   # What is implemented, what is design-only
-    failure-matrix.md          # Every failure mode with detection, retry, terminal state
-    architecture.mmd           # Mermaid logical flow diagram
-    failure-paths.mmd          # Mermaid failure path diagram
-  pyproject.toml
+├── src/
+│   └── beda_orchestrator/
+│       ├── __init__.py
+│       ├── enums.py         # InquiryIntent, RoutingAction, ReasonCode, AuditEventType
+│       ├── models.py        # InboundEnvelope, InboundTriageResult, RoutingDecision, ApprovalCommand
+│       ├── policy.py        # Deterministic policy engine (pure function)
+│       ├── approval.py      # HMAC-SHA256 approval token issuance & verification
+│       ├── audit.py         # Append-only JSONL sink with SHA-256 hash chaining
+│       ├── dispatch.py      # Mock dispatcher & local idempotency registry
+│       └── demo.py          # 5-scenario reproducible demonstration runner
+├── tests/
+│   ├── __init__.py
+│   ├── helpers.py           # Shared test factories (make_envelope, make_triage)
+│   ├── test_models.py       # Model bounds, timezone checks, and immutability (18 tests)
+│   ├── test_policy.py       # Policy precedence, injection, and tier computation (19 tests)
+│   ├── test_approval.py     # Approval eligibility, HMAC verification, replay, expiry (20 tests)
+│   ├── test_audit.py        # Audit sink hash chaining, tampering, write failure (8 tests)
+│   └── test_e2e.py          # End-to-end vertical slice flows (15 tests)
+├── docs/
+│   ├── implementation-status.md  # Detailed implementation vs design-only matrix
+│   ├── failure-matrix.md         # 16 failure modes with detection and recovery rules
+│   ├── architecture-local.mmd    # Mermaid logical flow of implemented code
+│   ├── architecture-target.mmd   # Mermaid target system design with adapter boundaries
+│   └── failure-paths.mmd         # Mermaid failure-first decision tree
+└── pyproject.toml
 ```
 
 ---
 
-## Domain Objects and Trust Boundaries
+## 6. Trust Boundaries & Domain Objects
 
-Four models enforce a strict separation between transport metadata, untrusted extraction, deterministic decisions, and authorized actions.
+The system strictly decouples transport metadata, untrusted model extraction, policy decisions, and authorized outbound commands:
 
 ```
-  External World          Application Boundary           Human Boundary
-  ┌──────────┐     ┌─────────────────────────────┐    ┌──────────────┐
-  │ Inbound  │     │ InboundTriageResult          │    │ Approval     │
-  │ Envelope │────>│ (untrusted LLM extraction)   │    │ Command      │
-  │ (valid   │     │                              │    │ (HMAC-signed,│
-  │ transport│     │ RoutingDecision              │    │  expiring,   │
-  │ metadata)│     │ (deterministic policy output) │───>│  nonce-bound)│
-  └──────────┘     └─────────────────────────────┘    └──────┬───────┘
-                                                             │
-                                                      ┌──────▼───────┐
-                                                      │ Dispatcher   │
-                                                      │ (accepts only│
-                                                      │  verified    │
-                                                      │  commands)   │
-                                                      └──────────────┘
+  External / Transport          Untrusted Extraction           Deterministic Decision         Human Authorization Gate
+ ┌──────────────────────┐     ┌──────────────────────┐       ┌──────────────────────┐       ┌──────────────────────┐
+ │   InboundEnvelope    │     │ InboundTriageResult  │       │   RoutingDecision    │       │   ApprovalCommand    │
+ │                      │     │                      │       │                      │       │                      │
+ │ • sender_email       │────>│ • intent             │──────>│ • action             │──────>│ • payload_hash       │
+ │ • subject, body      │     │ • confidence_score   │       │ • reason_code        │       │ • recipient_hash     │
+ │ • source_channel     │     │ • extracted_budget   │       │ • requires_approval  │       │ • nonce (single-use) │
+ │ • idempotency_key    │     │ • draft_response     │       │ • policy_version     │       │ • HMAC signature     │
+ └──────────────────────┘     └──────────────────────┘       └──────────────────────┘       └──────────┬───────────┘
+                                                                                                       │
+                                                                                            ┌──────────▼───────────┐
+                                                                                            │    Mock Dispatcher   │
+                                                                                            │ (accepts only signed │
+                                                                                            │   ApprovalCommand)   │
+                                                                                            └──────────────────────┘
 ```
 
-| Model | Trust Level | Mutability | `extra` | Purpose |
-|---|---|---|---|---|
-| `InboundEnvelope` | Validated at ingress | Frozen | `forbid` | Transport metadata: sender, body, channel, idempotency key |
-| `InboundTriageResult` | Untrusted | Frozen | `forbid` | LLM extraction: intent, confidence, budget, draft. Never authoritative. |
-| `RoutingDecision` | Trusted (deterministic) | Frozen | `forbid` | Policy output: action, reason_code, policy_version. No LLM influence on action. |
-| `ApprovalCommand` | Trusted (human-issued) | Frozen | `forbid` | Authorization: payload hash, recipient hash, nonce, expiry, HMAC signature |
+- **`InboundEnvelope`:** Validated transport representation. Strips whitespace, normalizes email to lowercase, verifies timezone awareness, and generates SHA-256 content hashes.
+- **`InboundTriageResult`:** Untrusted generative extraction. Contains model classifications, suggested draft text, and extraction confidence. Contains zero execution authority.
+- **`RoutingDecision`:** Frozen deterministic policy output. Assigns routing queues and approval flags based solely on deterministic code.
+- **`ApprovalCommand`:** Bounded authorization object created exclusively by `approve_and_send()`. Binds the exact approved text and recipient using HMAC-SHA256.
 
 ---
 
-## Policy Table
+## 7. Policy Precedence Table
 
-The deterministic policy engine (`policy.py::evaluate_triage_decision`) applies rules in strict precedence order. First match wins. Lead tier is recomputed from `extracted_budget_usd`; the LLM-provided tier is ignored.
+`policy.py::evaluate_triage_decision` executes in strict priority order. The first matching condition terminates evaluation:
 
-| Priority | Condition | Action | Reason Code | Requires Approval | Test |
+| Priority | Evaluated Condition | Assigned Action | Reason Code | Approval Required? | Test Reference |
 |---|---|---|---|---|---|
-| 1 | Prompt injection patterns detected in extraction output | `quarantine` | `prompt_injection_detected` | No | `TestInjectionDetection` |
-| 2 | Intent is `spam_or_malicious` | `auto_archive_spam` | `spam_classified` | No | `TestSpamRouting` |
-| 3 | Contradictory fields (e.g., support intent + enterprise budget) | `quarantine` | `contradictory_fields` | No | `TestContradictoryFields` |
-| 4 | Confidence score < 0.85 | `queue_for_hitl_draft_review` | `low_confidence` | Yes | `TestLowConfidence` |
-| 5 | Enterprise sales + budget >= $50,000 (recomputed) | `escalate_to_human_sales` | `enterprise_sales_qualified` | Yes | `TestEnterpriseSalesRouting` |
-| 6 | >= 2 missing critical fields | `trigger_clarification` | `missing_critical_fields` | Yes | `TestMissingFields` |
-| 7 | Default | `queue_for_hitl_draft_review` | `standard_hitl_review` | Yes | `TestDefaultRouting` |
-
-Key invariants tested:
-- Malicious input never becomes a sales lead (even with high budget).
-- Low confidence is never overridden by high lead value.
-- Missing fields never bypass approval.
-- A valid commercial quote is never sent without approval.
+| **1** | Prompt injection pattern in company, draft, evidence, or domains | `QUARANTINE` | `prompt_injection_detected` | No | `TestInjectionDetection` |
+| **2** | Intent is `SPAM_OR_MALICIOUS` | `AUTO_ARCHIVE_SPAM` | `spam_classified` | No | `TestSpamRouting` |
+| **3** | Contradictory extraction (e.g. support/careers intent with budget >= $50k) | `QUARANTINE` | `contradictory_fields` | No | `TestContradictoryFields` |
+| **4** | Extraction confidence score < `0.85` | `QUEUE_FOR_HITL_DRAFT_REVIEW` | `low_confidence` | Yes | `TestLowConfidence` |
+| **5** | Intent is `ENTERPRISE_SALES` and recomputed budget >= $50,000 | `ESCALATE_TO_HUMAN_SALES` | `enterprise_sales_qualified` | Yes | `TestEnterpriseSalesRouting` |
+| **6** | Count of missing critical fields >= `2` | `TRIGGER_CLARIFICATION` | `missing_critical_fields` | Yes | `TestMissingFields` |
+| **7** | Default fallback for standard inquiries | `QUEUE_FOR_HITL_DRAFT_REVIEW` | `standard_hitl_review` | Yes | `TestDefaultRouting` |
 
 ---
 
-## Failure Matrix
+## 8. Approval & Dispatch Invariants
 
-See [`docs/failure-matrix.md`](docs/failure-matrix.md) for the complete table with columns: failure, detection point, side effects already performed, retry policy, terminal state, operator action, and test reference.
+1. **Payload Hash Binding:** The payload hash is computed deterministically inside `approve_and_send()` as $\text{SHA256}(\text{approved\_draft})$. Callers cannot forge or spoof this hash.
+2. **Approval Eligibility Gate:** `approve_and_send()` raises a `ValueError` if invoked on decisions where `requires_human_approval is False` or where the action is `AUTO_ARCHIVE_SPAM` or `QUARANTINE`.
+3. **Single-Use Nonce & Replay Prevention:** `verify_approval()` registers the command's cryptographic nonce in an in-memory set. Subsequent verification attempts with the same nonce fail closed with `ApprovalVerificationError`.
+4. **Timezone-Aware Expiry:** Commands carry an explicit `expires_at` timestamp in UTC. Verification rejects expired commands using constant-time comparison against UTC current time.
+5. **Dispatch Gate:** The dispatcher accepts only a validated `ApprovalCommand`. Model output or raw text cannot be submitted to the dispatch worker.
 
 ---
 
-## Architecture Diagram
+## 9. Failure Matrix
 
-Logical flow with trust boundaries and implementation status labels:
+Full failure modes, detection points, retry semantics, and test references are documented in [`docs/failure-matrix.md`](docs/failure-matrix.md).
+
+---
+
+## 10. Test Commands & Verification
+
+The test suite runs offline without environment configuration or external services:
+
+```bash
+# Run full test suite
+pytest -v
+
+# Run individual test suites
+pytest tests/test_models.py -v     # Model validation & timezone invariants (18 tests)
+pytest tests/test_policy.py -v     # Policy precedence & tier recomputation (19 tests)
+pytest tests/test_approval.py -v   # HMAC tokens, eligibility & replay checks (20 tests)
+pytest tests/test_audit.py -v      # Audit hash chaining & write failure tests (8 tests)
+pytest tests/test_e2e.py -v        # End-to-end integration flows (15 tests)
+```
+
+**Total Test Count:** 80 passing tests (verified via pytest runner).
+
+---
+
+## 11. System Architecture Diagrams
+
+### Local Implemented Architecture
+See [`docs/architecture-local.mmd`](docs/architecture-local.mmd):
 
 ```mermaid
 flowchart LR
-    Client[Inbound source]
-    Ingress[Ingress adapter<br/>design boundary]
-    Verify{Signature &<br/>size valid?}
-    Queue[(Async queue<br/>design boundary)]
-    Pre[Deterministic pre-check<br/>normalize + idempotency<br/>implemented]
-    Extract[Mock/LLM extractor<br/>untrusted result<br/>implemented as mock]
-    Validate{Schema &<br/>confidence valid?}
-    Policy[Deterministic policy engine<br/>implemented & tested]
-    CRM[(CRM reconciliation<br/>design boundary)]
-    Review[Human review<br/>implemented as<br/>local approval]
-    Approval[ApprovalCommand<br/>HMAC + expiry + nonce<br/>implemented & tested]
-    Dispatch[Mock dispatcher<br/>no model access<br/>implemented]
-    Audit[(Append-only JSONL<br/>local demo<br/>implemented & tested)]
-    Quarantine[(Quarantine / DLQ)]
-    Retry{Retryable<br/>failure?}
+    Client[Inbound Caller / Test Runner]
+    Envelope[InboundEnvelope<br/>transport metadata]
+    Triage[Mock Triage Extractor<br/>InboundTriageResult]
+    Policy[Deterministic Policy Engine<br/>evaluate_triage_decision]
+    Decision[RoutingDecision<br/>action + reason_code]
+    Human[Human Approver<br/>approve_and_send]
+    Command[ApprovalCommand<br/>HMAC + nonce + expiry]
+    Dispatcher[Mock Dispatcher<br/>verify_approval + send]
+    AuditSink[(AuditSink<br/>append-only JSONL + hash chain)]
+    Quarantine[(Quarantine / Archive State)]
 
-    Client -->|InboundEnvelope| Ingress
-    Ingress --> Verify
-    Verify -->|reject + audit| Quarantine
-    Verify -->|valid| Queue
-    Queue --> Pre
-    Pre -->|duplicate: prior outcome| Audit
-    Pre --> Extract
-    Extract -->|InboundTriageResult| Validate
-    Validate -->|invalid| Quarantine
-    Validate -->|valid| Policy
-    Policy -->|CRM candidate| CRM
-    CRM --> Review
-    CRM -->|timeout| Retry
-    Retry -->|bounded retry| CRM
-    Retry -->|exhausted| Quarantine
-    Policy -->|spam / injection / low confidence| Quarantine
-    Review -->|approve exact payload| Approval
-    Review -->|reject / edit| Audit
-    Approval -->|verified command only| Dispatch
-    Dispatch -->|success| Audit
-    Dispatch -->|timeout / error| Retry
-
-    Ingress -.-> Audit
-    Policy -.-> Audit
-    Approval -.-> Audit
-    Quarantine -.-> Audit
-
-    classDef implemented fill:#eef6ff,stroke:#2563eb,color:#111827
-    classDef boundary fill:#f8fafc,stroke:#64748b,color:#111827,stroke-dasharray:4 3
-    classDef failure fill:#fff7ed,stroke:#c2410c,color:#111827
-
-    class Ingress,Pre,Policy,Review,Approval,Dispatch,Audit implemented
-    class Queue,CRM boundary
-    class Verify,Validate,Retry,Quarantine failure
+    Client -->|validates| Envelope
+    Envelope --> Triage
+    Triage --> Policy
+    Envelope --> Policy
+    Policy -->|requires_human_approval = true| Decision
+    Policy -->|spam / injection / contradictory| Quarantine
+    Decision --> Human
+    Human -->|issues verified token| Command
+    Command --> Dispatcher
+    Dispatcher -->|dispatched| AuditSink
+    Policy -.->|audit event| AuditSink
+    Quarantine -.->|audit event| AuditSink
+    Dispatcher -.->|failure event| AuditSink
 ```
 
-Failure-path diagram: [`docs/failure-paths.mmd`](docs/failure-paths.mmd)
+### Target System Architecture (Design-Only Adapters)
+See [`docs/architecture-target.mmd`](docs/architecture-target.mmd).
+
+### Failure & Recovery Decision Paths
+See [`docs/failure-paths.mmd`](docs/failure-paths.mmd).
 
 ---
 
-## What Is Intentionally Not Implemented
+## 12. Known Limitations
 
-This repository is a reference implementation. The following components are design targets with clear interfaces but no working code:
-
-| Component | Extension Point | What Would Change |
-|---|---|---|
-| **HTTP ingress** | Replace `InboundEnvelope` construction with a FastAPI endpoint that validates HMAC signatures and constructs envelopes from webhook payloads. | Add `src/beda_orchestrator/ingress.py`. |
-| **Async task queue** | Replace synchronous function calls with Celery tasks backed by Redis. | Add `src/beda_orchestrator/tasks.py`, `celery_app.py`. |
-| **Persistent storage** | Replace in-memory dictionaries with PostgreSQL. Audit sink becomes a database table. | Add `src/beda_orchestrator/db.py`, migrations. |
-| **CRM reconciliation** | Add `pg_trgm` fuzzy matching and pgvector similarity after the policy engine. | Add `src/beda_orchestrator/crm.py`. |
-| **LLM extraction** | Replace mock triage with an API call to Claude/GPT with JSON mode and Pydantic schema enforcement. | Add `src/beda_orchestrator/extractor.py`. |
-| **PII redaction** | Add Presidio or regex scrubbing before sending text to external LLM providers. | Add `src/beda_orchestrator/redaction.py`. |
-| **Slack approval UI** | Replace `approve_and_send()` calls with a Slack Block Kit interactive handler. | Add `src/beda_orchestrator/slack_adapter.py`. |
-| **SMTP dispatch** | Replace `mock_dispatch()` with SendGrid or SMTP client. | Modify `dispatch.py` to use an adapter interface. |
-| **Distributed replay registry** | Replace in-memory `_seen_nonces` set with Redis `SET NX EX`. | Modify `approval.py`. |
+- **Replay Storage Scope:** The replay registry is stored in-memory (`set[str]`). It resets upon process restart and is not shared across multi-process workers. Distributed deployments require Redis atomic operations.
+- **Audit File Storage:** The audit log enforces append-only chaining at the application layer. It does not enforce filesystem-level WORM (Write Once, Read Many) protections.
+- **Injection Pattern Coverage:** Injection filtering in `policy.py` uses compiled regular expressions for canonical injection markers. Production deployments require dedicated classifier models or commercial prompt firewalls.
+- **Simulated Dispatch:** `mock_dispatch()` prints formatted status lines to standard output and writes audit events; it does not connect to outbound network relays.
 
 ---
 
-## Test and Verification Commands
+## Author & Engineering Profile
 
-```bash
-# Run all tests (60 tests, no external dependencies needed)
-python -m pytest tests/ -v
-
-# Run specific test suites
-python -m pytest tests/test_models.py -v     # 11 model validation tests
-python -m pytest tests/test_policy.py -v     # 19 policy engine tests
-python -m pytest tests/test_approval.py -v   # 8 approval token tests
-python -m pytest tests/test_audit.py -v      # 6 audit sink tests
-python -m pytest tests/test_e2e.py -v        # 6 end-to-end tests
-
-# Run the local demo
-set PYTHONPATH=src
-set BEDA_APPROVAL_SECRET=demo_secret_change_me_in_production_32chars
-python -m beda_orchestrator.demo
-```
-
----
-
-## Deliberately Refused Automation
-
-This system categorically refuses to automatically send outbound commercial proposals, price quotes, SLAs, or contractual commitments without human approval.
-
-The failure modes this prevents:
-- **Prompt injection:** An attacker embeds instructions in a form field that cause the LLM draft to contain fabricated discounts or commitments. Without an approval gate, this becomes a binding communication on company letterhead.
-- **Hallucinated commitments:** The LLM drafts a timeline or price that does not reflect actual capacity. Without human review, this creates reputational and legal risk.
-- **Regulatory exposure:** Auto-generated responses may inadvertently reference confidential information from other clients.
-
-The enforcement mechanism is the `ApprovalCommand`: the dispatcher accepts only a cryptographically signed, expiring, nonce-bound command. No model output, no free-form text, no direct database mutation reaches an external recipient without a human clicking approve.
-
----
-
-## Author
-
-**Muhammad Hisyam Alfaris**
-Informatics Engineering, STT Terpadu Nurul Fikri | Cyber Security & Web Systems
-- Portfolio: [aboutsyem.web.id](https://aboutsyem.web.id)
-- GitHub: [@Kavleri](https://github.com/Kavleri)
-- Email: muhammadhisyamalfaris50@gmail.com
+**Muhammad Hisyam Alfaris**  
+*Informatics Engineering (STT Terpadu Nurul Fikri) | Cyber Security & Defensive Systems*  
+- **Portfolio:** [aboutsyem.web.id](https://aboutsyem.web.id)  
+- **GitHub:** [@Kavleri](https://github.com/Kavleri)  
+- **Email:** [muhammadhisyamalfaris50@gmail.com](mailto:muhammadhisyamalfaris50@gmail.com)

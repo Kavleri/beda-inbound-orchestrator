@@ -1,65 +1,54 @@
 ```mermaid
 flowchart TD
-    Start[Inbound request]
-    Sig{Signature valid?}
-    Size{Within size limit?}
+    Start[Inbound request / Envelope]
+    Sig{Signature valid?<br/>design boundary}
+    Size{Within size limit?<br/>Pydantic validation}
     Idem{Idempotency key seen?}
-    Extract[Run bounded extraction]
+    Extract[Run extraction]
     LLM{Output valid &<br/>confidence >= 0.85?}
-    Injection{Injection or<br/>contradiction?}
-    CRM[Reconcile CRM]
-    Match{Exactly one<br/>match?}
+    Injection{Injection or<br/>contradiction detected?}
     Policy[Evaluate deterministic policy]
-    Approve{Human approval<br/>valid & unexpired?}
-    Send[Dispatch with provider idempotency key]
-    Provider{Provider response?}
-    Done[Terminal success]
-    Reject[Reject + audit]
-    Duplicate[Return prior outcome]
-    Quarantine[Quarantine]
-    Retry[Bounded retry]
-    DLQ[DLQ + operator replay]
-    Replay[Replay after investigation]
+    Eligibility{Decision eligible<br/>for approval?}
+    Approve{Human approval command<br/>signature, expiry & nonce valid?}
+    Send[Dispatch message]
+    AuditLog{Audit sink write<br/>successful?}
+    Done[Terminal Success]
+
+    Reject[Reject + log error]
+    Duplicate[Return prior decision]
+    Quarantine[Quarantine / Archive]
+    FailClosed[Reject: fail-closed]
+    Halt[Halt processing / DLQ]
 
     Start --> Sig
     Sig -->|no| Reject
     Sig -->|yes| Size
-    Size -->|no| Reject
+    Size -->|no: validation error| Reject
     Size -->|yes| Idem
-    Idem -->|yes| Duplicate
+    Idem -->|yes: duplicate| Duplicate
     Idem -->|no| Extract
     Extract --> LLM
     LLM -->|no: schema failure or low confidence| Quarantine
     LLM -->|yes| Injection
-    Injection -->|detected| Quarantine
-    Injection -->|clean| CRM
-    CRM --> Match
-    Match -->|zero or multiple| Quarantine
-    Match -->|one| Policy
-    Policy -->|requires HITL| Approve
-    Policy -->|spam| Quarantine
-    Approve -->|no / expired / replayed| Quarantine
+    Injection -->|yes: injection or contradiction| Quarantine
+    Injection -->|clean| Policy
+    Policy -->|requires approval| Eligibility
+    Policy -->|spam / archive| Quarantine
+    Eligibility -->|no: spam or quarantine| FailClosed
+    Eligibility -->|yes| Approve
+    Approve -->|no: expired, replayed, or bad signature| FailClosed
     Approve -->|yes| Send
-    Send --> Provider
-    Provider -->|2xx| Done
-    Provider -->|timeout or 5xx| Retry
-    Retry -->|attempts remain| Send
-    Retry -->|exhausted| DLQ
-    DLQ -->|controlled replay| Replay
-    Replay --> Idem
+    Send --> AuditLog
+    AuditLog -->|no: write failure| Halt
+    AuditLog -->|yes| Done
 
-    Reject -.->|append event| Done
-    Duplicate -.->|append event| Done
-    Quarantine -.->|append event| Done
-    DLQ -.->|append event| Done
+    classDef normal fill:#f8fafc,stroke:#475569,color:#111827;
+    classDef decision fill:#eff6ff,stroke:#2563eb,color:#111827;
+    classDef failure fill:#fff7ed,stroke:#c2410c,color:#111827;
+    classDef terminal fill:#ecfdf5,stroke:#047857,color:#111827;
 
-    classDef normal fill:#f8fafc,stroke:#475569,color:#111827
-    classDef decision fill:#eff6ff,stroke:#2563eb,color:#111827
-    classDef failure fill:#fff7ed,stroke:#c2410c,color:#111827
-    classDef terminal fill:#ecfdf5,stroke:#047857,color:#111827
-
-    class Start,Extract,CRM,Policy,Send,Replay normal
-    class Sig,Size,Idem,LLM,Injection,Match,Approve,Provider,Retry decision
-    class Reject,Duplicate,Quarantine,DLQ failure
-    class Done terminal
+    class Start,Extract,Policy,Send normal;
+    class Sig,Size,Idem,LLM,Injection,Eligibility,Approve,AuditLog decision;
+    class Reject,Duplicate,Quarantine,FailClosed,Halt failure;
+    class Done terminal;
 ```

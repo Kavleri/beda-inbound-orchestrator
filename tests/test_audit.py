@@ -1,9 +1,19 @@
 """
-Tests for the audit sink: append, hash chaining, verification, and failure.
+Tests for the audit sink: append, hash chaining, verification, and failure modes.
+
+Covers:
+  - File creation and genesis hash
+  - Canonical hash chaining over multiple entries
+  - Tampering detection (content modification, deleted/inserted lines)
+  - Malformed JSON line detection
+  - Resume from existing file
+  - Detail truncation and PII exclusion
+  - Write failure error propagation (fail-closed / raise RuntimeError)
 """
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -25,7 +35,7 @@ class TestAuditSink:
         )
         sink.log(event)
         assert audit_path.exists()
-        lines = audit_path.read_text().strip().split("\n")
+        lines = audit_path.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 1
 
     def test_genesis_hash(self, audit_path):
@@ -57,16 +67,32 @@ class TestAuditSink:
                 correlation_id=f"event-{i}",
             ))
         # Tamper with the first line.
-        lines = audit_path.read_text().strip().split("\n")
+        lines = audit_path.read_text(encoding="utf-8").strip().split("\n")
         record = json.loads(lines[0])
         record["outcome"] = "TAMPERED"
         lines[0] = json.dumps(record, separators=(",", ":"), sort_keys=True)
-        audit_path.write_text("\n".join(lines) + "\n")
+        audit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         sink2 = AuditSink(audit_path)
         valid, line_num, error = sink2.verify_chain()
         assert not valid
         assert "prev_hash mismatch" in error
+
+    def test_malformed_json_in_chain_detected(self, audit_path):
+        sink = AuditSink(audit_path)
+        sink.log(AuditEvent(
+            event_type=AuditEventType.ENVELOPE_RECEIVED,
+            correlation_id="event-1",
+        ))
+        # Corrupt file with unparseable JSON line
+        with open(audit_path, "a", encoding="utf-8") as f:
+            f.write("{corrupted json string\n")
+
+        sink2 = AuditSink(audit_path)
+        valid, line_num, error = sink2.verify_chain()
+        assert not valid
+        assert "invalid JSON" in error
+        assert line_num == 2
 
     def test_resume_from_existing_file(self, audit_path):
         sink1 = AuditSink(audit_path)
@@ -95,7 +121,17 @@ class TestAuditSink:
             detail=long_detail,
         )
         sink.log(event)
-        content = audit_path.read_text()
-        # detail should be truncated, not the full 1000 chars.
+        content = audit_path.read_text(encoding="utf-8")
         record = json.loads(content.strip())
         assert len(record["detail"]) == 500
+
+    def test_audit_write_failure_raises_runtime_error(self, audit_path):
+        """Audit sink write failure must fail loud and not be swallowed."""
+        sink = AuditSink(audit_path)
+        event = AuditEvent(
+            event_type=AuditEventType.ENVELOPE_RECEIVED,
+            correlation_id="test-fail",
+        )
+        with patch("builtins.open", side_effect=OSError("Disk write error")):
+            with pytest.raises(RuntimeError, match="Audit sink write failed"):
+                sink.log(event)
