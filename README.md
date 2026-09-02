@@ -11,7 +11,7 @@ The local implementation provides a self-contained vertical slice focusing on da
 - **Strict domain validation (`models.py`):** Pydantic v2 models with `extra="forbid"`, frozen state mutation guards, timezone-aware datetime validation, and bounds on all fields.
 - **Deterministic policy engine (`policy.py`):** Pure function evaluating untrusted extraction results against a 7-rule precedence table with stable reason codes. Lead tier is deterministically recomputed from normalized budget.
 - **Cryptographic approval gate (`approval.py`):** HMAC-SHA256 tokens binding the approved draft, normalized recipient, decision ID, and single-use nonce. Enforces strict approval eligibility and internal payload hash computation.
-- **Append-only audit sink (`audit.py`):** Canonical JSON Lines logger with SHA-256 hash chaining and chain verification. Truncates sensitive details and excludes raw inquiry bodies.
+- **Append-only audit sink (`audit.py`):** Canonical JSON Lines logger with SHA-256 hash chaining and chain verification. Application-level append-only JSONL behavior with hash-chain verification. Filesystem WORM or tamper-proof storage is not implemented. Truncates sensitive details and excludes raw inquiry bodies.
 - **Safe mock dispatcher (`dispatch.py`):** Accepts only verified `ApprovalCommand` objects. Rejects direct model outputs, expired tokens, and replayed nonces.
 
 ---
@@ -84,6 +84,8 @@ python -m beda_orchestrator.demo
 
 Running `python -m beda_orchestrator.demo` executes five sequential scenarios against the reference implementation:
 
+Five inquiry scenarios are executed, followed by a separate audit-chain verification step.
+
 1. **Standard Support Inquiry:** Valid inquiry routed to `queue_for_hitl_draft_review` with reason code `standard_hitl_review`. Held for review; draft is not dispatched.
 2. **Enterprise Sales Lead:** Enterprise budget ($150,000) evaluated by policy engine -> routed to `escalate_to_human_sales`. Human reviewer executes `approve_and_send()` -> valid `ApprovalCommand` generated -> mock dispatch executes and records audit event.
 3. **Prompt Injection in LLM Output:** Extracted draft contains `"ignore previous instructions..."` -> policy engine quarantines payload with reason code `prompt_injection_detected`. Dispatch is blocked.
@@ -112,7 +114,7 @@ beda-inbound-orchestrator/
 │   ├── helpers.py           # Shared test factories (make_envelope, make_triage)
 │   ├── test_models.py       # Model bounds, timezone checks, and immutability (18 tests)
 │   ├── test_policy.py       # Policy precedence, injection, and tier computation (19 tests)
-│   ├── test_approval.py     # Approval eligibility, HMAC verification, replay, expiry (20 tests)
+│   ├── test_approval.py     # Approval eligibility, HMAC verification, replay, expiry (23 tests)
 │   ├── test_audit.py        # Audit sink hash chaining, tampering, write failure (8 tests)
 │   └── test_e2e.py          # End-to-end vertical slice flows (15 tests)
 ├── docs/
@@ -151,7 +153,7 @@ The system strictly decouples transport metadata, untrusted model extraction, po
 - **`InboundEnvelope`:** Validated transport representation. Strips whitespace, normalizes email to lowercase, verifies timezone awareness, and generates SHA-256 content hashes.
 - **`InboundTriageResult`:** Untrusted generative extraction. Contains model classifications, suggested draft text, and extraction confidence. Contains zero execution authority.
 - **`RoutingDecision`:** Frozen deterministic policy output. Assigns routing queues and approval flags based solely on deterministic code.
-- **`ApprovalCommand`:** Bounded authorization object created exclusively by `approve_and_send()`. Binds the exact approved text and recipient using HMAC-SHA256.
+- **`ApprovalCommand`:** Bounded authorization object created exclusively by `approve_and_send()`. Binds the exact approved text and normalized recipient using HMAC-SHA256.
 
 ---
 
@@ -198,12 +200,12 @@ pytest -v
 # Run individual test suites
 pytest tests/test_models.py -v     # Model validation & timezone invariants (18 tests)
 pytest tests/test_policy.py -v     # Policy precedence & tier recomputation (19 tests)
-pytest tests/test_approval.py -v   # HMAC tokens, eligibility & replay checks (20 tests)
+pytest tests/test_approval.py -v   # HMAC tokens, eligibility & replay checks (23 tests)
 pytest tests/test_audit.py -v      # Audit hash chaining & write failure tests (8 tests)
 pytest tests/test_e2e.py -v        # End-to-end integration flows (15 tests)
 ```
 
-**Total Test Count:** 80 passing tests (verified via pytest runner).
+**Total Test Count:** 83 passing tests (verified via pytest runner).
 
 ---
 
@@ -214,29 +216,27 @@ See [`docs/architecture-local.mmd`](docs/architecture-local.mmd):
 
 ```mermaid
 flowchart LR
-    Client[Inbound Caller / Test Runner]
     Envelope[InboundEnvelope<br/>transport metadata]
-    Triage[Mock Triage Extractor<br/>InboundTriageResult]
-    Policy[Deterministic Policy Engine<br/>evaluate_triage_decision]
-    Decision[RoutingDecision<br/>action + reason_code]
-    Human[Human Approver<br/>approve_and_send]
+    Triage[Mock Triage<br/>untrusted extraction]
+    Policy[Deterministic Policy<br/>pure rule evaluation]
+    Decision[RoutingDecision<br/>action + reason code]
+    Approval[Human Approval<br/>approve_and_send]
     Command[ApprovalCommand<br/>HMAC + nonce + expiry]
-    Dispatcher[Mock Dispatcher<br/>verify_approval + send]
-    AuditSink[(AuditSink<br/>append-only JSONL + hash chain)]
-    Quarantine[(Quarantine / Archive State)]
+    Dispatcher[Mock Dispatcher<br/>verify & safe dispatch]
+    AuditSink[(AuditSink<br/>append-only JSONL)]
+    Quarantine[(Quarantine / Archive<br/>terminal outcome)]
 
-    Client -->|validates| Envelope
     Envelope --> Triage
     Triage --> Policy
     Envelope --> Policy
-    Policy -->|requires_human_approval = true| Decision
-    Policy -->|spam / injection / contradictory| Quarantine
-    Decision --> Human
-    Human -->|issues verified token| Command
+    Policy -->|requires approval| Decision
+    Policy -->|spam / injection / conflict| Quarantine
+    Decision --> Approval
+    Approval --> Command
     Command --> Dispatcher
-    Dispatcher -->|dispatched| AuditSink
-    Policy -.->|audit event| AuditSink
-    Quarantine -.->|audit event| AuditSink
+    Dispatcher -->|success event| AuditSink
+    Policy -.->|decision event| AuditSink
+    Quarantine -.->|quarantine event| AuditSink
     Dispatcher -.->|failure event| AuditSink
 ```
 
@@ -251,7 +251,7 @@ See [`docs/failure-paths.mmd`](docs/failure-paths.mmd).
 ## 12. Known Limitations
 
 - **Replay Storage Scope:** The replay registry is stored in-memory (`set[str]`). It resets upon process restart and is not shared across multi-process workers. Distributed deployments require Redis atomic operations.
-- **Audit File Storage:** The audit log enforces append-only chaining at the application layer. It does not enforce filesystem-level WORM (Write Once, Read Many) protections.
+- **Audit File Storage:** The audit log enforces append-only chaining at the application layer. Filesystem WORM or tamper-proof storage is not implemented.
 - **Injection Pattern Coverage:** Injection filtering in `policy.py` uses compiled regular expressions for canonical injection markers. Production deployments require dedicated classifier models or commercial prompt firewalls.
 - **Simulated Dispatch:** `mock_dispatch()` prints formatted status lines to standard output and writes audit events; it does not connect to outbound network relays.
 

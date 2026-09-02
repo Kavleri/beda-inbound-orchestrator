@@ -4,7 +4,9 @@ Tests for HMAC approval token issuance, verification, eligibility, and failure m
 Covers:
   - Valid approval issuance & internal payload hash computation
   - Invariant: payload_hash == SHA256(approved_draft)
+  - Changing 1 char in draft invalidates binding
   - Expected payload hash mismatch rejection
+  - Recipient normalization determinism (strip & lowercase)
   - Approval eligibility (spam, quarantine, requires_approval=False rejected)
   - Draft bounds (empty, whitespace, >8000 chars rejected)
   - TTL bounds (<=0 or >7 days rejected)
@@ -89,6 +91,53 @@ class TestApprovalIssuance:
             approver_identity="approver@beda.studio",
         )
         assert cmd.payload_hash == expected_hash
+
+    def test_draft_modification_invalidates_binding(self):
+        """Modifying 1 character of the approved draft produces a different hash and fails verification."""
+        draft = "Exact approved response text."
+        cmd = approve_and_send(
+            decision=_make_decision(),
+            approved_draft=draft,
+            recipient_email="client@example.com",
+            approver_identity="approver@beda.studio",
+        )
+        # Verify valid command first
+        verify_approval(cmd)
+        reset_replay_registry()
+
+        # Alter draft by 1 character
+        altered_draft = "Exact approved response text!"
+        altered_cmd = ApprovalCommand(
+            approval_id=cmd.approval_id,
+            decision_id=cmd.decision_id,
+            event_id=cmd.event_id,
+            payload_hash=hashlib.sha256(altered_draft.encode("utf-8")).hexdigest(),
+            recipient_hash=cmd.recipient_hash,
+            approver_identity=cmd.approver_identity,
+            approved_draft=altered_draft,
+            nonce=cmd.nonce,
+            expires_at=cmd.expires_at,
+            signature=cmd.signature,
+        )
+        with pytest.raises(ApprovalVerificationError, match="Signature mismatch"):
+            verify_approval(altered_cmd)
+
+    def test_recipient_normalization_is_deterministic(self):
+        """Whitespace and capitalization variations produce the exact same recipient_hash."""
+        cmd1 = approve_and_send(
+            decision=_make_decision(),
+            approved_draft="Draft text.",
+            recipient_email="Client@Example.COM",
+            approver_identity="approver@beda.studio",
+        )
+        cmd2 = approve_and_send(
+            decision=_make_decision(),
+            approved_draft="Draft text.",
+            recipient_email="  client@example.com  ",
+            approver_identity="approver@beda.studio",
+        )
+        assert cmd1.recipient_hash == cmd2.recipient_hash
+        assert cmd1.recipient_hash == hashlib.sha256("client@example.com".encode("utf-8")).hexdigest()
 
     def test_expected_payload_hash_matching_succeeds(self):
         draft = "Verified proposal text."
@@ -258,6 +307,11 @@ class TestExpiry:
         future = datetime.now(timezone.utc) + timedelta(hours=2)
         with pytest.raises(ApprovalVerificationError, match="expired"):
             verify_approval(cmd, now=future)
+
+    def test_valid_future_command_verifies(self):
+        cmd = _issue_command()
+        now_valid = datetime.now(timezone.utc) + timedelta(minutes=10)
+        verify_approval(cmd, now=now_valid)
 
     def test_timezone_naive_comparison_rejected(self):
         cmd = _issue_command()

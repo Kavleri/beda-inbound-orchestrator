@@ -12,8 +12,8 @@ Status of each component relative to the reference implementation scope and desi
 | **Lead tier recomputation** | Implemented and tested | `src/beda_orchestrator/policy.py` | `tests/test_policy.py::TestEnterpriseSalesRouting` |
 | **Prompt injection detection** | Implemented and tested | `src/beda_orchestrator/policy.py` | `tests/test_policy.py::TestInjectionDetection` |
 | **Contradictory field detection** | Implemented and tested | `src/beda_orchestrator/policy.py` | `tests/test_policy.py::TestContradictoryFields` |
-| **HMAC-SHA256 approval issuance** | Implemented and tested | `src/beda_orchestrator/approval.py` | `tests/test_approval.py` (20 tests) |
-| **Payload hash internal binding** | Implemented and tested | `src/beda_orchestrator/approval.py` | `tests/test_approval.py::TestApprovalIssuance::test_payload_hash_computed_internally_invariant` |
+| **HMAC-SHA256 approval issuance** | Implemented and tested | `src/beda_orchestrator/approval.py` | `tests/test_approval.py` (23 tests) |
+| **Payload hash internal binding** | Implemented and tested | `src/beda_orchestrator/approval.py` | `tests/test_approval.py::TestApprovalIssuance::test_payload_hash_computed_internally_invariant`, `test_draft_modification_invalidates_binding` |
 | **Approval eligibility gate** | Implemented and tested | `src/beda_orchestrator/approval.py` | `tests/test_approval.py::TestApprovalEligibility` (8 tests) |
 | **Constant-time signature verification** | Implemented and tested | `src/beda_orchestrator/approval.py` | `tests/test_approval.py::TestWrongSecret` |
 | **Timezone-aware expiry enforcement** | Implemented and tested | `src/beda_orchestrator/approval.py` | `tests/test_approval.py::TestExpiry` |
@@ -23,8 +23,8 @@ Status of each component relative to the reference implementation scope and desi
 | **Audit write failure error propagation** | Implemented and tested | `src/beda_orchestrator/audit.py` | `tests/test_audit.py::TestAuditSink::test_audit_write_failure_raises_runtime_error` |
 | **Mock dispatcher** | Implemented and tested | `src/beda_orchestrator/dispatch.py` | `tests/test_e2e.py` |
 | **Idempotency / duplicate check (in-memory)** | Implemented and tested | `src/beda_orchestrator/dispatch.py` | `tests/test_e2e.py::TestDuplicateEvent` |
-| **Local demo (5 scenarios)** | Implemented and tested | `src/beda_orchestrator/demo.py` | Verified via runner |
-| **End-to-end vertical slice** | Implemented and tested | `tests/test_e2e.py` | `tests/test_e2e.py` (6 test classes) |
+| **Local demo (5 scenarios + audit verification)** | Implemented and tested | `src/beda_orchestrator/demo.py` | Verified via runner |
+| **End-to-end vertical slice** | Implemented and tested | `tests/test_e2e.py` | `tests/test_e2e.py` (6 test classes / 15 tests) |
 
 ## Design-Only (Not Implemented)
 
