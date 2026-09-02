@@ -1,0 +1,53 @@
+```mermaid
+flowchart LR
+    Client[Inbound source]
+    Ingress[Ingress adapter<br/>design boundary]
+    Verify{Signature &<br/>size valid?}
+    Queue[(Async queue<br/>design boundary)]
+    Pre[Deterministic pre-check<br/>normalize + idempotency<br/>implemented]
+    Extract[Mock/LLM extractor<br/>untrusted result<br/>implemented as mock]
+    Validate{Schema &<br/>confidence valid?}
+    Policy[Deterministic policy engine<br/>implemented & tested]
+    CRM[(CRM reconciliation<br/>design boundary)]
+    Review[Human review<br/>implemented as<br/>local approval]
+    Approval[ApprovalCommand<br/>HMAC + expiry + nonce<br/>implemented & tested]
+    Dispatch[Mock dispatcher<br/>no model access<br/>implemented]
+    Audit[(Append-only JSONL<br/>local demo<br/>implemented & tested)]
+    Quarantine[(Quarantine / DLQ)]
+    Retry{Retryable<br/>failure?}
+
+    Client -->|InboundEnvelope| Ingress
+    Ingress --> Verify
+    Verify -->|reject + audit| Quarantine
+    Verify -->|valid| Queue
+    Queue --> Pre
+    Pre -->|duplicate: prior outcome| Audit
+    Pre --> Extract
+    Extract -->|InboundTriageResult| Validate
+    Validate -->|invalid| Quarantine
+    Validate -->|valid| Policy
+    Policy -->|CRM candidate| CRM
+    CRM --> Review
+    CRM -->|timeout| Retry
+    Retry -->|bounded retry| CRM
+    Retry -->|exhausted| Quarantine
+    Policy -->|spam / injection / low confidence| Quarantine
+    Review -->|approve exact payload| Approval
+    Review -->|reject / edit| Audit
+    Approval -->|verified command only| Dispatch
+    Dispatch -->|success| Audit
+    Dispatch -->|timeout / error| Retry
+
+    Ingress -.-> Audit
+    Policy -.-> Audit
+    Approval -.-> Audit
+    Quarantine -.-> Audit
+
+    classDef implemented fill:#eef6ff,stroke:#2563eb,color:#111827
+    classDef boundary fill:#f8fafc,stroke:#64748b,color:#111827,stroke-dasharray:4 3
+    classDef failure fill:#fff7ed,stroke:#c2410c,color:#111827
+
+    class Ingress,Pre,Policy,Review,Approval,Dispatch,Audit implemented
+    class Queue,CRM boundary
+    class Verify,Validate,Retry,Quarantine failure
+```

@@ -1,0 +1,22 @@
+# Failure Matrix
+
+Each row describes a failure condition, where it is detected, what side effects may have already occurred, the retry policy, the terminal state, what an operator should do, and which test covers it.
+
+| Failure | Detection Point | Side Effects Already Performed | Retry Policy | Terminal State | Operator Action | Test |
+|---|---|---|---|---|---|---|
+| **Invalid webhook signature** | Ingress adapter (design boundary) | None | No retry. Reject immediately. | Rejected + audit event | Review source IP and sender. | Design only — no ingress adapter implemented. |
+| **Oversized or malformed request** | Envelope validation (Pydantic) | None | No retry. Return validation error. | Rejected | Check sender for repeated malformed payloads. | `test_models.py::TestInboundEnvelope::test_rejects_overlong_subject` |
+| **Duplicate event (same idempotency key)** | `dispatch.check_duplicate()` | None (prior decision already recorded) | No retry. Return prior decision. | Prior outcome returned + audit event | None needed unless intentional resubmission. | `test_e2e.py::TestDuplicateEvent` |
+| **LLM extraction timeout** | Extraction adapter (design boundary) | Envelope queued | Bounded retry (design: max 2 attempts with backoff), then quarantine. | Quarantine + DLQ | Manually triage the raw envelope. | Design only — no LLM integration. |
+| **LLM malformed output (schema failure)** | Pydantic validation of `InboundTriageResult` | Envelope queued | Bounded retry (design: max 2 attempts with schema feedback), then quarantine. | Quarantine | Review extractor prompt and model version. | `test_e2e.py::TestMalformedLLMOutput` |
+| **LLM low confidence** | `policy.evaluate_triage_decision()` | Triage result recorded | No retry. Route to HITL review. | HITL review queue | Human reviews and re-classifies. | `test_policy.py::TestLowConfidence` |
+| **CRM reconciliation timeout** | CRM adapter (design boundary) | Triage completed, decision pending | Bounded retry with idempotency key, then quarantine. | Quarantine + DLQ | Replay after CRM recovery. | Design only — no CRM integration. |
+| **CRM ambiguous match (0 or >1 match)** | CRM adapter (design boundary) | Triage completed | No retry. Quarantine for human resolution. | Quarantine | Operator resolves identity manually. | Design only — no CRM integration. |
+| **Approval token expired** | `approval.verify_approval()` | Dispatch attempted (audit logged) | No retry. Fail closed. | Rejected + audit event | Re-approve with fresh token. | `test_approval.py::TestExpiry` |
+| **Approval token replayed** | `approval.verify_approval()` (nonce check) | Dispatch attempted (audit logged) | No retry. Fail closed. | Rejected + audit event | Investigate potential replay attack. | `test_approval.py::TestReplay`, `test_e2e.py::TestReplayedApproval` |
+| **Approval token tampered (wrong signature)** | `approval.verify_approval()` (HMAC check) | Dispatch attempted (audit logged) | No retry. Fail closed. | Rejected + audit event | Investigate token source. | `test_approval.py::TestPayloadMutation`, `TestRecipientMutation`, `TestWrongSecret` |
+| **Prompt injection in LLM output** | `policy._has_injection_signals()` | Triage result recorded | No retry. Quarantine immediately. | Quarantine + audit event | Investigate source and LLM behavior. | `test_policy.py::TestInjectionDetection` |
+| **Contradictory extraction fields** | `policy._has_contradictory_fields()` | Triage result recorded | No retry. Quarantine. | Quarantine + audit event | Review extraction quality. | `test_policy.py::TestContradictoryFields` |
+| **Outbound dispatch provider error** | Dispatch adapter (design boundary) | Approval consumed (nonce registered) | Bounded retry with provider idempotency key (design). No blind retry of commercial actions. | DLQ after max attempts | Replay via controlled operator action. | Design only — mock dispatcher always succeeds. |
+| **Audit sink write failure** | `audit.AuditSink.log()` | Processing in progress | No retry. Raises `RuntimeError`. | Processing should halt or enter quarantine. Audit events must not be silently discarded. | Fix storage, replay from DLQ. | Handled by `RuntimeError` in `audit.py`. |
+| **Missing BEDA_APPROVAL_SECRET** | `approval._get_secret()` | None | No retry. Raises `RuntimeError` at startup. | Process cannot start. | Set the environment variable. | `test_approval.py::TestMissingSecret` |

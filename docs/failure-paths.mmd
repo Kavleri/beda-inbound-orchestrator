@@ -1,0 +1,65 @@
+```mermaid
+flowchart TD
+    Start[Inbound request]
+    Sig{Signature valid?}
+    Size{Within size limit?}
+    Idem{Idempotency key seen?}
+    Extract[Run bounded extraction]
+    LLM{Output valid &<br/>confidence >= 0.85?}
+    Injection{Injection or<br/>contradiction?}
+    CRM[Reconcile CRM]
+    Match{Exactly one<br/>match?}
+    Policy[Evaluate deterministic policy]
+    Approve{Human approval<br/>valid & unexpired?}
+    Send[Dispatch with provider idempotency key]
+    Provider{Provider response?}
+    Done[Terminal success]
+    Reject[Reject + audit]
+    Duplicate[Return prior outcome]
+    Quarantine[Quarantine]
+    Retry[Bounded retry]
+    DLQ[DLQ + operator replay]
+    Replay[Replay after investigation]
+
+    Start --> Sig
+    Sig -->|no| Reject
+    Sig -->|yes| Size
+    Size -->|no| Reject
+    Size -->|yes| Idem
+    Idem -->|yes| Duplicate
+    Idem -->|no| Extract
+    Extract --> LLM
+    LLM -->|no: schema failure or low confidence| Quarantine
+    LLM -->|yes| Injection
+    Injection -->|detected| Quarantine
+    Injection -->|clean| CRM
+    CRM --> Match
+    Match -->|zero or multiple| Quarantine
+    Match -->|one| Policy
+    Policy -->|requires HITL| Approve
+    Policy -->|spam| Quarantine
+    Approve -->|no / expired / replayed| Quarantine
+    Approve -->|yes| Send
+    Send --> Provider
+    Provider -->|2xx| Done
+    Provider -->|timeout or 5xx| Retry
+    Retry -->|attempts remain| Send
+    Retry -->|exhausted| DLQ
+    DLQ -->|controlled replay| Replay
+    Replay --> Idem
+
+    Reject -.->|append event| Done
+    Duplicate -.->|append event| Done
+    Quarantine -.->|append event| Done
+    DLQ -.->|append event| Done
+
+    classDef normal fill:#f8fafc,stroke:#475569,color:#111827
+    classDef decision fill:#eff6ff,stroke:#2563eb,color:#111827
+    classDef failure fill:#fff7ed,stroke:#c2410c,color:#111827
+    classDef terminal fill:#ecfdf5,stroke:#047857,color:#111827
+
+    class Start,Extract,CRM,Policy,Send,Replay normal
+    class Sig,Size,Idem,LLM,Injection,Match,Approve,Provider,Retry decision
+    class Reject,Duplicate,Quarantine,DLQ failure
+    class Done terminal
+```

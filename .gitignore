@@ -11,3 +11,4 @@ ENV/
 .coverage
 htmlcov/
 .DS_Store
+demo_audit.jsonl
