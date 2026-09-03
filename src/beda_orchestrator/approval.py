@@ -25,7 +25,7 @@ import hmac
 import os
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from .enums import RoutingAction
@@ -160,7 +160,7 @@ def approve_and_send(
     secret = _get_secret()
     approval_id = uuid4()
     nonce = secrets.token_hex(16)
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
 
     signature = _compute_signature(
         payload_hash=computed_payload_hash,
@@ -210,7 +210,7 @@ def verify_approval(
     Verification consumes the single-use nonce. A replayed command fails closed.
     """
     secret = _get_secret()
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if now.tzinfo is None:
         raise ValueError("Comparison datetime 'now' must be timezone-aware (e.g. UTC).")
 

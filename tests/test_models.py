@@ -8,10 +8,11 @@ Covers:
   - ApprovalCommand bounds, signature length, and timezone-aware expiry
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from helpers import make_envelope, make_triage
 from pydantic import ValidationError
 
 from beda_orchestrator.enums import (
@@ -26,7 +27,6 @@ from beda_orchestrator.models import (
     InboundTriageResult,
     RoutingDecision,
 )
-from helpers import make_envelope, make_triage
 
 
 class TestInboundEnvelope:
@@ -195,7 +195,7 @@ class TestApprovalCommandModel:
                 approver_identity="user@beda.studio",
                 approved_draft="Draft text.",
                 nonce="c" * 32,
-                expires_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(UTC),
                 signature="d" * 64,
                 extra_param="forbidden",
             )

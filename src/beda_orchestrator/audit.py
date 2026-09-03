@@ -18,11 +18,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from .enums import AuditEventType, ReasonCode
 
@@ -33,16 +32,16 @@ class AuditEvent:
     """Structured audit event for the JSON Lines log."""
 
     __slots__ = (
-        "event_type",
-        "event_id",
-        "correlation_id",
-        "timestamp",
-        "policy_version",
         "actor",
-        "payload_hash",
-        "outcome",
-        "reason_code",
+        "correlation_id",
         "detail",
+        "event_id",
+        "event_type",
+        "outcome",
+        "payload_hash",
+        "policy_version",
+        "reason_code",
+        "timestamp",
     )
 
     def __init__(
@@ -60,7 +59,7 @@ class AuditEvent:
         self.event_type = event_type
         self.event_id = str(uuid4())
         self.correlation_id = correlation_id
-        self.timestamp = datetime.now(timezone.utc).isoformat()
+        self.timestamp = datetime.now(UTC).isoformat()
         self.policy_version = policy_version
         self.actor = actor
         self.payload_hash = payload_hash
@@ -165,8 +164,10 @@ class AuditSink:
                     return (
                         False,
                         i,
-                        f"Line {i}: prev_hash mismatch. "
-                        f"Expected {prev!r}, got {record.get('prev_hash')!r}.",
+                        (
+                            f"Line {i}: prev_hash mismatch. "
+                            f"Expected {prev!r}, got {record.get('prev_hash')!r}."
+                        ),
                     )
                 prev = hashlib.sha256(raw_line.encode()).hexdigest()
 

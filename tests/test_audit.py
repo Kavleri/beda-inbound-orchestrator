@@ -74,7 +74,7 @@ class TestAuditSink:
         audit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         sink2 = AuditSink(audit_path)
-        valid, line_num, error = sink2.verify_chain()
+        valid, _line_num, error = sink2.verify_chain()
         assert not valid
         assert "prev_hash mismatch" in error
 
@@ -132,6 +132,8 @@ class TestAuditSink:
             event_type=AuditEventType.ENVELOPE_RECEIVED,
             correlation_id="test-fail",
         )
-        with patch("builtins.open", side_effect=OSError("Disk write error")):
-            with pytest.raises(RuntimeError, match="Audit sink write failed"):
-                sink.log(event)
+        with (
+            patch("builtins.open", side_effect=OSError("Disk write error")),
+            pytest.raises(RuntimeError, match="Audit sink write failed"),
+        ):
+            sink.log(event)

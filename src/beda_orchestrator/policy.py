@@ -18,17 +18,15 @@ Rule precedence (first match wins):
 
 from __future__ import annotations
 
-import re
-
-from .enums import InquiryIntent, ReasonCode, RoutingAction, UrgencyLevel
+from .enums import InquiryIntent, ReasonCode, RoutingAction
 from .models import (
+    _INJECTION_PATTERNS,
     CONFIDENCE_THRESHOLD,
     ENTERPRISE_BUDGET_FLOOR_USD,
     POLICY_VERSION,
     InboundEnvelope,
     InboundTriageResult,
     RoutingDecision,
-    _INJECTION_PATTERNS,
 )
 
 
@@ -67,13 +65,11 @@ def _has_contradictory_fields(triage: InboundTriageResult) -> bool:
         and triage.extracted_budget_usd > 0
     ):
         return True
-    if (
+    return bool(
         triage.intent in (InquiryIntent.TECHNICAL_SUPPORT, InquiryIntent.CAREERS)
         and triage.extracted_budget_usd is not None
         and triage.extracted_budget_usd >= ENTERPRISE_BUDGET_FLOOR_USD
-    ):
-        return True
-    return False
+    )
 
 
 def _decision(

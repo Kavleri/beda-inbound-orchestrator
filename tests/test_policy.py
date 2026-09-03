@@ -5,12 +5,12 @@ Covers rule precedence, tier recomputation, injection detection,
 contradiction detection, and boundary conditions.
 """
 
-import pytest
 
-from beda_orchestrator.enums import InquiryIntent, ReasonCode, RoutingAction, UrgencyLevel
+from helpers import make_envelope, make_triage
+
+from beda_orchestrator.enums import InquiryIntent, ReasonCode, RoutingAction
 from beda_orchestrator.models import CONFIDENCE_THRESHOLD
 from beda_orchestrator.policy import evaluate_triage_decision
-from helpers import make_envelope, make_triage
 
 
 class TestSpamRouting:

@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .enums import InquiryIntent, ReasonCode, RoutingAction, UrgencyLevel
 
@@ -53,7 +53,7 @@ class InboundEnvelope(BaseModel):
     body: str = Field(..., min_length=1, max_length=50_000)
     source_channel: str = Field(..., pattern=r"^(email|webform|slack_api|whatsapp)$")
     idempotency_key: str = Field(..., min_length=16, max_length=128)
-    received_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    received_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("sender_email")
     @classmethod
@@ -147,7 +147,7 @@ class RoutingDecision(BaseModel):
     reason_code: ReasonCode
     reason_detail: str
     policy_version: str = POLICY_VERSION
-    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("evaluated_at")
     @classmethod
@@ -179,7 +179,7 @@ class ApprovalCommand(BaseModel):
     nonce: str = Field(..., min_length=16, max_length=64)
     expires_at: datetime
     signature: str = Field(..., min_length=64, max_length=128)
-    issued_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    issued_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("expires_at", "issued_at")
     @classmethod
@@ -189,7 +189,7 @@ class ApprovalCommand(BaseModel):
         return v
 
     def is_expired(self, now: datetime | None = None) -> bool:
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         if now.tzinfo is None:
             raise ValueError("Comparison datetime 'now' must be timezone-aware.")
         return now >= self.expires_at

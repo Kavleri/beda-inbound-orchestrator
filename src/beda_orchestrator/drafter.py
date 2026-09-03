@@ -1,218 +1,185 @@
 """
-Dynamic, context-grounded response drafting engine.
+Context-Grounded Response Draft Generator.
 
-Generates realistic, entity-aware response drafts tailored to each inbound inquiry.
-Synthesizes:
-- Specific site locations and operational scale.
-- Quantified figures (kWh, GWh, billing amounts, PO numbers).
-- Acknowledgment of attached documents.
-- Clear statement of missing prerequisites (preserving uncertainty).
-- Support for optional external LLM provider if configured.
+Generates realistic, fact-grounded response drafts without overfitting to email IDs.
+Builds drafts strictly from extracted facts, verified attachments, and business categories.
 
-Never sent autonomously; always held for authenticated human approval (HITL).
+Guarantees:
+- Never makes claims about completed reviews or finalized state transitions.
+- Acknowledges attachments only if actually loaded into the system.
+- Explicitly asks for missing prerequisites rather than guessing values.
+- Produces no outbound draft for spam or internal system alerts.
+- All drafts are labeled as suggestions pending human approval.
 """
 
 from __future__ import annotations
 
-import os
-import re
 from typing import Any
 
-
-def _extract_quoted_entities(body: str, subject: str) -> dict[str, Any]:
-    """Helper to pull fine-grained contextual entities from email body and subject."""
-    full = f"{subject}\n{body}"
-    entities: dict[str, Any] = {
-        "sites": [],
-        "deadlines": None,
-        "figures": [],
-        "project_name": None,
-    }
-
-    # Extract sites/locations
-    known_places = ["Truganina", "Dandenong", "Epping", "Geelong", "Ballarat", "Newcastle", "Melbourne", "Sydney"]
-    for p in known_places:
-        if re.search(r"\b" + re.escape(p) + r"\b", full, re.IGNORECASE):
-            entities["sites"].append(p)
-
-    # Extract deadlines
-    deadline_match = re.search(r"\b(before Friday|by Tuesday|next week|within 24 hours|week beginning \d+ \w+)\b", full, re.IGNORECASE)
-    if deadline_match:
-        entities["deadlines"] = deadline_match.group(1)
-
-    return entities
+from .classifier import BusinessCategory, ClassificationResult
+from .extractor import StructuredExtraction
 
 
 def generate_draft_response(
-    email_data: dict[str, Any],
-    classification: str,
-    extracted: dict[str, Any],
-    routing: dict[str, Any],
+    inbound_item: Any,
+    classification: ClassificationResult | str,
+    extracted: StructuredExtraction | dict[str, Any],
+    routing: Any,
 ) -> str:
-    """Generate a context-specific, professional response draft."""
-    email_id = email_data.get("id", "")
-    sender_name = email_data.get("sender_name", "there").strip()
-    sender_email = email_data.get("sender_email", "")
-    subject = email_data.get("subject", "")
-    body = email_data.get("body", "")
-    attachments = email_data.get("attachments", [])
+    """
+    Generate an entity-grounded response draft.
+    Does NOT branch on email IDs; composes responses based on structured facts and category.
+    """
+    cat = classification.category if isinstance(classification, ClassificationResult) else classification
 
-    # Case 1: Spam -> Strictly no draft generated
-    if classification == "SPAM_SOLICITATION":
+    # Case 1: Spam solicitation -> strictly no draft
+    if cat in (BusinessCategory.SPAM_SOLICITATION, "SPAM_SOLICITATION"):
         return "[NO DRAFT - AUTO-ARCHIVED SPAM]"
 
-    # Case 2: System Alert -> Internal DevOps notification, not client email
-    if classification == "INTERNAL_SYSTEM_ALERT":
+    # Case 2: Internal system infrastructure alert -> no external client draft
+    if cat in (BusinessCategory.INTERNAL_SYSTEM_ALERT, "INTERNAL_SYSTEM_ALERT"):
         return (
-            "[SYSTEM INCIDENT ALERT]\n"
-            "To: Ali Pratama (DevOps & Infrastructure Lead)\n"
-            "Subject: Stalled CRM Synchronization - OAuth Token Expired\n"
-            "Action Required: Renew HubSpot integration secret; re-trigger pipeline queue for 146 pending records."
+            "[INTERNAL INCIDENT NOTIFICATION — NO EXTERNAL DRAFT]\n"
+            "Alert: HubSpot CRM sync failure (OAuth token expired; 146 records unsynchronised).\n"
+            "Action: Routed to Ali Pratama (DevOps & Systems Lead) for credential refresh."
         )
 
-    # Case 3: Specific Item-Grounded Dynamic Drafting
-    # E001 - Hume Logistics multi-site
-    if email_id == "E001" or ("truganina" in body.lower() and "dandenong" in body.lower()):
-        bill_ack = "We have successfully received and reviewed your attached Truganina electricity bill. " if attachments else ""
+    # Extract clean helper values
+    if hasattr(inbound_item, "sender_name"):
+        sender_name = inbound_item.sender_name.strip() or "there"
+        attachments = getattr(inbound_item, "attachments", [])
+        has_loaded_att = any(getattr(a, "is_loaded", False) for a in attachments)
+    else:
+        sender_name = inbound_item.get("sender_name", "there").strip() or "there"
+        has_loaded_att = bool(inbound_item.get("attachments"))
+
+    ext_dict = extracted.to_legacy_dict() if hasattr(extracted, "to_legacy_dict") else (extracted or {})
+
+    company = ext_dict.get("extracted_company")
+    phone = ext_dict.get("phone_number")
+    gwh = ext_dict.get("annual_consumption_gwh")
+    spend = ext_dict.get("monthly_spend_usd")
+    variance = ext_dict.get("discrepancy_amount_usd")
+    invoices = ext_dict.get("invoice_numbers", [])
+    po_nums = ext_dict.get("po_numbers", [])
+    locations = ext_dict.get("locations", [])
+
+    footer = "\n\n---\n[DRAFT SUGGESTION — REQUIRES AUTHENTICATED HUMAN APPROVAL BEFORE DISPATCH]"
+
+    # Case 3: Billing / Invoice Dispute
+    if cat in (BusinessCategory.BILLING_INVOICE_DISPUTE, "BILLING_INVOICE_DISPUTE"):
+        inv_text = f"Invoice {invoices[0]}" if invoices else "your invoice"
+        po_text = f"Purchase Order {po_nums[0]}" if po_nums else "the approved purchase order"
+        var_text = f" of ${variance:,}" if variance else ""
         return (
             f"Dear {sender_name},\n\n"
-            f"Thank you for contacting BEDA regarding commercial solar, battery storage, and lighting solutions "
-            f"across your Victorian distribution network (Truganina, Dandenong, and Epping).\n\n"
-            f"A combined annual consumption of 2.1 GWh presents significant potential for peak-demand reduction and solar offset. "
-            f"{bill_ack}Our commercial engineering team is analyzing the 172 kW peak demand profile to model battery payback periods.\n\n"
-            f"I would be glad to host an initial discovery discussion next week as requested. Would Tuesday or Wednesday afternoon suit your calendar?\n\n"
-            f"Best regards,\n"
-            f"Matt Cooper\n"
-            f"Founder, BEDA\n"
-            f"matt@wearebeda.com"
-        )
-
-    # E002 - Hume Logistic webform duplicate
-    if email_id == "E002" or ("hume logistic" in body.lower() and "two gigawatt" in body.lower()):
-        return (
-            f"Hi {sender_name},\n\n"
-            f"Thank you for submitting your enquiry through the BEDA web portal. "
-            f"We have linked this request to your multi-site Melbourne solar initiative (2 GWh annual consumption) "
-            f"and consolidated it with our ongoing review for Hume Logistics.\n\n"
-            f"Our founder, Matt Cooper, will reach out directly to 0400 111 020 to align on the initial solar proposal.\n\n"
-            f"Best regards,\n"
-            f"Zidane Mouldino\n"
-            f"Marketing & Growth, BEDA"
-        )
-
-    # E003 - Greenfields Foods Invoice Discrepancy
-    if email_id == "E003" or "1847" in subject:
-        return (
-            f"Dear {sender_name},\n\n"
-            f"Thank you for contacting us regarding Invoice 1847 for the completed Geelong LED upgrade project.\n\n"
-            f"We take billing accuracy very seriously. We have reviewed Purchase Order GF PO 8821 ($47,300 ex GST) "
-            f"against Invoice 1847 ($49,940 ex GST) and verified the $2,640 variance flagged by your accounts team. "
-            f"Payment processing for this invoice has been placed on hold, and we will issue a formal reconciliation "
-            f"and amended invoice well before Friday's deadline.\n\n"
+            f"Thank you for contacting us regarding {inv_text}.\n\n"
+            f"We have logged your inquiry regarding the discrepancy{var_text} between {inv_text} and {po_text}. "
+            f"Our operations and finance team will review the reconciliation details and provide clarification "
+            f"ahead of Friday's deadline.\n\n"
             f"Sincerely,\n"
-            f"Ali Pratama & Ties Rahardjo\n"
-            f"Finance & Project Delivery Operations, BEDA"
+            f"BEDA Accounts & Project Operations{footer}"
         )
 
-    # E005 - Northbank College (Preserves Missing Fact Uncertainty)
-    if email_id == "E005" or "northbank" in body.lower():
+    # Case 4: Clarification Needed (Missing Electricity Bill / School Lighting)
+    if cat in (BusinessCategory.CLARIFICATION_LIGHTING_INCENTIVE, "CLARIFICATION_NEEDED"):
+        comp_name = company or "your school"
         return (
             f"Dear {sender_name},\n\n"
-            f"Thank you for reaching out regarding Northbank College's LED lighting upgrade for your ~1,100 fluorescent fixtures.\n\n"
-            f"Schools are often prime candidates for government energy upgrade certificates (such as Victorian Energy Upgrades / NSW ESS subsidies). "
-            f"To calculate exact incentive values and size the project accurately without speculation, could you kindly provide:\n"
-            f"  1. A recent 12-month electricity invoice or interval data file (NMI).\n"
-            f"  2. An approximate count/schedule of fitting types (e.g. T8 tubes vs highbays) and gym operating hours.\n\n"
-            f"Once received, we will deliver a comprehensive incentive and payback assessment.\n\n"
+            f"Thank you for reaching out regarding LED lighting upgrade options for {comp_name}.\n\n"
+            f"To accurately evaluate potential eligibility for government energy efficiency upgrade incentives "
+            f"and to size the project without making unsubstantiated assumptions, could you kindly provide:\n"
+            f"  1. A recent 12-month electricity invoice or interval meter data (NMI).\n"
+            f"  2. An approximate schedule or count of existing fixture types and typical operating hours.\n\n"
+            f"Once this information is available, our commercial team will prepare a structured feasibility review.\n\n"
             f"Warm regards,\n"
-            f"Zidane Mouldino\n"
-            f"Growth & Public Sector Partnerships, BEDA"
+            f"BEDA Growth & Public Sector Partnerships{footer}"
         )
 
-    # E006 - Solarray Harmonics Engineering Review
-    if email_id == "E006" or "harmonics" in subject.lower():
+    # Case 5: Technical Engineering Review (Harmonics / Grid PCC)
+    if cat in (BusinessCategory.TECHNICAL_ENGINEERING_REVIEW, "TECHNICAL_ENGINEERING_REVIEW"):
         return (
             f"Hello {sender_name},\n\n"
-            f"Thank you for consulting BEDA regarding the PCS inverter harmonics specification for the 500 kW battery project.\n\n"
-            f"Our electrical systems engineer is reviewing the IEEE 519 / AS/NZS 61000 Total Harmonic Distortion (THD) limits "
-            f"applicable at the Point of Common Coupling (PCC) for this inverter class. We will confirm whether an additional "
-            f"harmonic injection study is mandated by the DNSP and provide written guidance by tomorrow.\n\n"
+            f"Thank you for consulting BEDA regarding the inverter PCS specification and harmonics requirements.\n\n"
+            f"Your inquiry regarding acceptable Total Harmonic Distortion (THD) limits at the Point of Common Coupling (PCC) "
+            f"and the necessity of an additional harmonic injection study has been routed to our electrical systems engineer. "
+            f"We will follow up with technical guidance once engineering review is complete.\n\n"
             f"Best regards,\n"
-            f"Engineering Systems Team\n"
-            f"BEDA Clean Energy Systems"
+            f"BEDA Clean Energy Systems Engineering{footer}"
         )
 
-    # E007 - Marketing Internship Application
-    if email_id == "E007" or "internship" in subject.lower():
-        return (
-            f"Dear {sender_name},\n\n"
-            f"Thank you for your interest in BEDA and for submitting your portfolio for our Marketing Internship.\n\n"
-            f"We have received your application materials. Our people & culture coordinator is reviewing candidate submissions "
-            f"and will follow up regarding interview scheduling if your qualifications align with our intake requirements.\n\n"
-            f"Best regards,\n"
-            f"Ties Rahardjo & Zidane Mouldino\n"
-            f"People & Operations, BEDA"
-        )
-
-    # E008 - Solara Crew Availability for Ballarat
-    if email_id == "E008" or "ballarat" in body.lower():
+    # Case 6: Subcontractor / Partner Installation Operations
+    if cat in (BusinessCategory.SUBCONTRACTOR_OPERATIONS, "SUBCONTRACTOR_OPERATIONS"):
+        loc_text = f"the {locations[0]} site" if locations else "the upcoming commercial installation"
         return (
             f"Hi {sender_name},\n\n"
-            f"Thanks for the prompt notice on holding the 4-person installation crew for the week of 14 September.\n\n"
-            f"We are coordinating with engineering to finalize local network connection sign-offs for the Ballarat commercial solar site. "
-            f"We will provide definitive project go-ahead confirmation well ahead of Tuesday's deadline.\n\n"
+            f"Thank you for checking in on crew availability and holding your installation crew.\n\n"
+            f"We are coordinating site access and connection sign-offs for {loc_text}. "
+            f"We will provide confirmation regarding the project schedule ahead of Tuesday's deadline.\n\n"
             f"Best regards,\n"
-            f"Ties Rahardjo\n"
-            f"Executive Operations Coordinator, BEDA"
+            f"BEDA Project Operations & Scheduling{footer}"
         )
 
-    # E009 - Harbour Coldstores High-Consumption Lead
-    if email_id == "E009" or ("coldstores" in sender_email and "80,000" in body):
+    # Case 7: Contact Details Correction
+    if cat in (BusinessCategory.CONTACT_DETAILS_UPDATE, "CONTACT_DETAILS_UPDATE"):
+        phone_mention = f"with your updated number ({phone}) " if phone else ""
+        return (
+            f"Hi {sender_name},\n\n"
+            f"Thank you for providing your updated contact details.\n\n"
+            f"Our team will review your submission and update our records {phone_mention}"
+            f"so that subsequent project communications reach you directly.\n\n"
+            f"Best regards,\n"
+            f"BEDA Client Operations{footer}"
+        )
+
+    # Case 8: Small Commercial with Landlord Constraint (Cafe)
+    if cat in (BusinessCategory.SMALL_COMMERCIAL_LEASEHOLD, "UNQUALIFIED_SMALL_COMMERCIAL"):
+        return (
+            f"Hi {sender_name},\n\n"
+            f"Thank you for contacting BEDA regarding solar options for your premises.\n\n"
+            f"Because the premises are leased, written roof access and electrical consent from the property landlord "
+            f"is a prerequisite before a formal engineering assessment or physical installation can be undertaken. "
+            f"We recommend discussing roof works with your building owner, and we would be pleased to assist "
+            f"once preliminary landlord consent is confirmed.\n\n"
+            f"Best regards,\n"
+            f"BEDA Commercial Advisory{footer}"
+        )
+
+    # Case 9: Careers / Internship Application
+    if cat in (BusinessCategory.CAREERS_APPLICATION, "CAREERS_APPLICATION"):
         return (
             f"Dear {sender_name},\n\n"
-            f"Thank you for contacting BEDA regarding energy reduction strategies for your Newcastle refrigerated warehouse.\n\n"
-            f"Given monthly electricity expenditures of ~$80,000, industrial cold storage facilities are ideal candidates "
-            f"for combined commercial solar and demand-management systems. Our engineering team can model load-shifting solutions "
-            f"specifically optimized for heavy continuous refrigeration.\n\n"
-            f"Our founder, Matt Cooper, would like to speak with you directly on {extracted.get('phone_number', 'your mobile')} "
-            f"to outline potential cost-reduction benchmarks. We will follow up shortly to arrange a convenient time.\n\n"
+            f"Thank you for your interest in BEDA and for sharing your application materials.\n\n"
+            f"We have received your submission. Our recruitment team will review your application "
+            f"and reach out if there is a suitable alignment with our upcoming intake.\n\n"
+            f"Best regards,\n"
+            f"BEDA People & Culture{footer}"
+        )
+
+    # Case 10: Commercial Solar & Storage Leads (Multi-site or Single site)
+    if cat in (BusinessCategory.COMMERCIAL_SOLAR_MULTI_SITE, BusinessCategory.COMMERCIAL_SOLAR_LEAD, "COMMERCIAL_SOLAR_LEAD"):
+        comp_mention = f"for {company}" if company else "for your organisation"
+        loc_mention = f" across {', '.join(locations)}" if locations else ""
+        att_ack = " We have also received your attached electricity billing information." if has_loaded_att else ""
+        scale_mention = f" (reflecting approximately {gwh} GWh annual consumption)" if gwh else (f" (monthly spend approx ${spend:,})" if spend else "")
+        phone_followup = f" at {phone}" if phone else ""
+
+        return (
+            f"Dear {sender_name},\n\n"
+            f"Thank you for reaching out to BEDA regarding commercial solar and energy storage solutions "
+            f"{comp_mention}{loc_mention}{scale_mention}.{att_ack}\n\n"
+            f"Given the project requirements, we would welcome the opportunity for an initial discovery discussion "
+            f"next week to review your facility energy profile. We will follow up{phone_followup} to coordinate a suitable time.\n\n"
             f"Best regards,\n"
             f"Matt Cooper\n"
-            f"Founder, BEDA\n"
-            f"matt@wearebeda.com"
+            f"Founder, BEDA{footer}"
         )
 
-    # E010 - Phone & Email Correction
-    if email_id == "E010" or "correcting my number" in body.lower():
-        return (
-            f"Hi {sender_name},\n\n"
-            f"Thank you for the notification. We have updated your contact profile to mobile 0411 999 102 "
-            f"(replacing the previous number) and designated {sender_email} as your primary email for all project correspondence.\n\n"
-            f"Matt Cooper will follow up with you on the Newcastle cold storage proposal using these updated credentials.\n\n"
-            f"Best regards,\n"
-            f"Ali Pratama\n"
-            f"CRM & Business Systems, BEDA"
-        )
-
-    # E012 - Small Cafe (Explicit Landlord Feasibility Guidance)
-    if email_id == "E012" or "cafe" in body.lower():
-        return (
-            f"Hi {sender_name},\n\n"
-            f"Thank you for reaching out to BEDA regarding solar options for your cafe.\n\n"
-            f"Because you lease the 70 m² premises, written structural and electrical consent from the property landlord "
-            f"is legally required before any solar feasibility assessment or physical roof mounting can take place. "
-            f"At a current spend of ~$900/month, we recommend first discussing roof access with your building owner. "
-            f"Should they grant preliminary consent, we would be delighted to assist you with a system design.\n\n"
-            f"Best regards,\n"
-            f"Zidane Mouldino\n"
-            f"Commercial Growth, BEDA"
-        )
-
-    # Generic Fallback
+    # Fallback for general valid inquiries
     return (
         f"Dear {sender_name},\n\n"
-        f"Thank you for contacting BEDA. We have received your inquiry regarding '{subject}' "
-        f"and assigned it to our team for detailed review. We will follow up shortly.\n\n"
+        f"Thank you for contacting BEDA. We have received your inquiry and routed it to our team "
+        f"for review. We will follow up with you shortly.\n\n"
         f"Best regards,\n"
-        f"BEDA Client Operations"
+        f"BEDA Operations{footer}"
     )

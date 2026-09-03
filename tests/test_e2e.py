@@ -9,18 +9,15 @@ duplicate event, and replayed approval token.
 """
 
 import hashlib
-import os
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from helpers import make_envelope, make_triage
+from pydantic import ValidationError
 
 from beda_orchestrator.approval import (
-    ApprovalVerificationError,
     approve_and_send,
     reset_replay_registry,
-    verify_approval,
 )
 from beda_orchestrator.audit import AuditEvent, AuditSink
 from beda_orchestrator.dispatch import (
@@ -36,9 +33,8 @@ from beda_orchestrator.enums import (
     RoutingAction,
     UrgencyLevel,
 )
-from beda_orchestrator.models import InboundEnvelope, InboundTriageResult, RoutingDecision
+from beda_orchestrator.models import InboundTriageResult, RoutingDecision
 from beda_orchestrator.policy import evaluate_triage_decision
-from helpers import make_envelope, make_triage
 
 
 @pytest.fixture(autouse=True)
@@ -147,11 +143,11 @@ class TestMalformedLLMOutput:
     """Malformed LLM output should be caught by Pydantic validation."""
 
     def test_invalid_confidence_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             make_triage(confidence_score=2.0)
 
     def test_extra_fields_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             InboundTriageResult(
                 intent=InquiryIntent.GENERAL_INQUIRY,
                 urgency=UrgencyLevel.LOW,

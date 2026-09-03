@@ -15,8 +15,7 @@ Covers:
 """
 
 import hashlib
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -39,17 +38,17 @@ def _set_secret_and_reset(monkeypatch):
 
 
 def _make_decision(**overrides) -> RoutingDecision:
-    defaults = dict(
-        event_id=uuid4(),
-        triage_id=uuid4(),
-        idempotency_key="a" * 64,
-        action=RoutingAction.ESCALATE_TO_HUMAN_SALES,
-        target_queue="sales_tier_1",
-        requires_human_approval=True,
-        reason_code=ReasonCode.ENTERPRISE_SALES_QUALIFIED,
-        reason_detail="Test decision.",
-        policy_version="0.1.0",
-    )
+    defaults = {
+        "event_id": uuid4(),
+        "triage_id": uuid4(),
+        "idempotency_key": "a" * 64,
+        "action": RoutingAction.ESCALATE_TO_HUMAN_SALES,
+        "target_queue": "sales_tier_1",
+        "requires_human_approval": True,
+        "reason_code": ReasonCode.ENTERPRISE_SALES_QUALIFIED,
+        "reason_detail": "Test decision.",
+        "policy_version": "0.1.0",
+    }
     defaults.update(overrides)
     return RoutingDecision(**defaults)
 
@@ -77,7 +76,7 @@ class TestApprovalIssuance:
         assert cmd.payload_hash
         assert cmd.recipient_hash
         assert cmd.nonce
-        assert cmd.expires_at > datetime.now(timezone.utc)
+        assert cmd.expires_at > datetime.now(UTC)
         assert cmd.signature
 
     def test_payload_hash_computed_internally_invariant(self):
@@ -137,7 +136,7 @@ class TestApprovalIssuance:
             approver_identity="approver@beda.studio",
         )
         assert cmd1.recipient_hash == cmd2.recipient_hash
-        assert cmd1.recipient_hash == hashlib.sha256("client@example.com".encode("utf-8")).hexdigest()
+        assert cmd1.recipient_hash == hashlib.sha256(b"client@example.com").hexdigest()
 
     def test_expected_payload_hash_matching_succeeds(self):
         draft = "Verified proposal text."
@@ -304,18 +303,18 @@ class TestRecipientMutation:
 class TestExpiry:
     def test_expired_token_fails(self):
         cmd = _issue_command()
-        future = datetime.now(timezone.utc) + timedelta(hours=2)
+        future = datetime.now(UTC) + timedelta(hours=2)
         with pytest.raises(ApprovalVerificationError, match="expired"):
             verify_approval(cmd, now=future)
 
     def test_valid_future_command_verifies(self):
         cmd = _issue_command()
-        now_valid = datetime.now(timezone.utc) + timedelta(minutes=10)
+        now_valid = datetime.now(UTC) + timedelta(minutes=10)
         verify_approval(cmd, now=now_valid)
 
     def test_timezone_naive_comparison_rejected(self):
         cmd = _issue_command()
-        naive_now = datetime.now()  # timezone-naive
+        naive_now = datetime.now()
         with pytest.raises(ValueError, match="timezone-aware"):
             verify_approval(cmd, now=naive_now)
 

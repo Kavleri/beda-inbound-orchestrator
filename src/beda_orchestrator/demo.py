@@ -16,27 +16,22 @@ Shows five scenarios:
 from __future__ import annotations
 
 import hashlib
-import json
 import os
-import sys
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
 # Ensure the demo sets a secret if not already set.
 if not os.environ.get("BEDA_APPROVAL_SECRET"):
     os.environ["BEDA_APPROVAL_SECRET"] = "demo_secret_change_me_in_production_32chars"
 
-from .approval import approve_and_send, reset_replay_registry, verify_approval, ApprovalVerificationError
+from .approval import approve_and_send, reset_replay_registry
 from .audit import AuditEvent, AuditSink
 from .dispatch import (
-    DispatchResult,
     check_duplicate,
     mock_dispatch,
     record_decision,
     reset_idempotency_registry,
 )
-from .enums import AuditEventType, InquiryIntent, ReasonCode, RoutingAction, UrgencyLevel
+from .enums import AuditEventType, InquiryIntent, ReasonCode, UrgencyLevel
 from .models import InboundEnvelope, InboundTriageResult, RoutingDecision
 from .policy import evaluate_triage_decision
 
@@ -206,7 +201,7 @@ def run_demo() -> None:
 
     prior = check_duplicate(env4)
     if prior:
-        print(f"  Duplicate detected! Returning prior decision:")
+        print("  Duplicate detected! Returning prior decision:")
         print(f"  Prior action:     {prior.action}")
         print(f"  Prior reason:     {prior.reason_code}")
         audit_sink.log(AuditEvent(

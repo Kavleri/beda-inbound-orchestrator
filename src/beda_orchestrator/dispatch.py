@@ -12,15 +12,12 @@ interface.
 
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime
 
 from .approval import ApprovalVerificationError, verify_approval
 from .audit import AuditEvent, AuditSink
 from .enums import AuditEventType, ReasonCode
 from .models import ApprovalCommand, InboundEnvelope, RoutingDecision
-
 
 # This registry is process-local by design. It tracks processed events to return
 # idempotent responses within the demo session.
@@ -46,7 +43,7 @@ def record_decision(envelope: InboundEnvelope, decision: RoutingDecision) -> Non
 class DispatchResult:
     """Result of a dispatch attempt."""
 
-    __slots__ = ("success", "detail")
+    __slots__ = ("detail", "success")
 
     def __init__(self, success: bool, detail: str) -> None:
         self.success = success
