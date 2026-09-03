@@ -31,25 +31,18 @@ from uuid import UUID, uuid4
 from .enums import RoutingAction
 from .models import ApprovalCommand, RoutingDecision
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 MAX_APPROVAL_TTL_SECONDS = 604_800  # 7 days
 MIN_APPROVAL_TTL_SECONDS = 1
 EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
-# Ineligible actions that must NEVER produce an outbound approval command
+# Ineligible actions that must not produce an outbound approval command.
 INELIGIBLE_ACTIONS = {
     RoutingAction.AUTO_ARCHIVE_SPAM,
     RoutingAction.QUARANTINE,
 }
 
-
-# ---------------------------------------------------------------------------
-# Replay registry (in-memory, local reference implementation)
-# ---------------------------------------------------------------------------
-
+# This registry is process-local by design. A production deployment would need
+# a shared idempotency store; distributed replay prevention is out of scope here.
 _seen_nonces: set[str] = set()
 
 
@@ -57,10 +50,6 @@ def reset_replay_registry() -> None:
     """Clear the replay registry. For testing only."""
     _seen_nonces.clear()
 
-
-# ---------------------------------------------------------------------------
-# Secret management
-# ---------------------------------------------------------------------------
 
 def _get_secret() -> bytes:
     """Load HMAC secret from environment. Fail loud if missing."""
@@ -90,10 +79,6 @@ def _compute_signature(
     )
     return hmac.new(secret, message.encode("utf-8"), hashlib.sha256).hexdigest()
 
-
-# ---------------------------------------------------------------------------
-# Token construction (approve_and_send)
-# ---------------------------------------------------------------------------
 
 def approve_and_send(
     *,
@@ -200,10 +185,6 @@ def approve_and_send(
         signature=signature,
     )
 
-
-# ---------------------------------------------------------------------------
-# Token verification
-# ---------------------------------------------------------------------------
 
 class ApprovalVerificationError(Exception):
     """Raised when an approval command fails verification."""

@@ -9,10 +9,9 @@ Hash chaining: each event includes prev_hash (SHA-256 of the previous
 line's JSON bytes) so that tampering with earlier entries is detectable
 by re-hashing. The genesis event has prev_hash = "0" * 64.
 
-Storage caveat: this writes to a local file. Append-only behavior is
-enforced at the application level only. WORM or tamper-proof storage
-is not implemented. For production, use a database with append-only
-constraints or a dedicated audit service.
+Storage caveat: Application-level append-only JSONL behavior with hash-chain
+verification. Filesystem WORM or tamper-proof storage is not implemented. For
+production, use a database with append-only constraints or a dedicated audit service.
 """
 
 from __future__ import annotations

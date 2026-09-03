@@ -22,10 +22,8 @@ from .enums import AuditEventType, ReasonCode
 from .models import ApprovalCommand, InboundEnvelope, RoutingDecision
 
 
-# ---------------------------------------------------------------------------
-# Idempotency registry (in-memory, local demo)
-# ---------------------------------------------------------------------------
-
+# This registry is process-local by design. It tracks processed events to return
+# idempotent responses within the demo session.
 _seen_events: dict[str, RoutingDecision] = {}
 
 
@@ -44,10 +42,6 @@ def record_decision(envelope: InboundEnvelope, decision: RoutingDecision) -> Non
     """Record a decision for future duplicate checks."""
     _seen_events[str(envelope.idempotency_key)] = decision
 
-
-# ---------------------------------------------------------------------------
-# Mock dispatcher
-# ---------------------------------------------------------------------------
 
 class DispatchResult:
     """Result of a dispatch attempt."""
@@ -68,11 +62,18 @@ def mock_dispatch(
     """
     Dispatch an approved outbound message (mock implementation).
 
+    Single-Use Semantics:
+      Verification consumes the command's single-use nonce immediately. If a
+      downstream provider failure or network timeout occurs, the command cannot
+      be blindly reused. A production system would require a dedicated dispatch
+      state machine and provider idempotency key; this reference implementation
+      enforces single-use command verification only.
+
     Steps:
-      1. Verify the approval command (signature, expiry, replay).
-      2. Log the dispatch attempt.
-      3. Simulate sending (print to stdout).
-      4. Log success or failure.
+      1. Log dispatch attempt to audit sink.
+      2. Verify the approval command (signature, expiry, single-use nonce).
+      3. Simulate delivery (print summary to stdout without PII or raw draft).
+      4. Log outcome to audit sink.
 
     Returns:
         DispatchResult indicating success or failure.

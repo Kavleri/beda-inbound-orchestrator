@@ -19,10 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .enums import InquiryIntent, ReasonCode, RoutingAction, UrgencyLevel
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 POLICY_VERSION = "0.1.0"
 CONFIDENCE_THRESHOLD = 0.85
 ENTERPRISE_BUDGET_FLOOR_USD = 50_000
@@ -38,10 +34,6 @@ _INJECTION_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-
-# ---------------------------------------------------------------------------
-# InboundEnvelope — trusted transport metadata
-# ---------------------------------------------------------------------------
 
 class InboundEnvelope(BaseModel):
     """
@@ -93,10 +85,6 @@ class InboundEnvelope(BaseModel):
         return hashlib.sha256(content.encode()).hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# InboundTriageResult — untrusted LLM extraction
-# ---------------------------------------------------------------------------
-
 class InboundTriageResult(BaseModel):
     """
     Semantic extraction from an LLM or mock extractor.
@@ -138,10 +126,6 @@ class InboundTriageResult(BaseModel):
         return v
 
 
-# ---------------------------------------------------------------------------
-# RoutingDecision — deterministic policy output
-# ---------------------------------------------------------------------------
-
 class RoutingDecision(BaseModel):
     """
     Output of the deterministic policy engine. Frozen after creation.
@@ -173,9 +157,6 @@ class RoutingDecision(BaseModel):
         return v
 
 
-# ---------------------------------------------------------------------------
-# ApprovalCommand — bounded, expiring human authorization
-# ---------------------------------------------------------------------------
 
 class ApprovalCommand(BaseModel):
     """
