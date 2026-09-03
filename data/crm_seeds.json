@@ -1,0 +1,57 @@
+[
+  {
+    "id": "C001",
+    "company": "Hume Logistics Pty Ltd",
+    "contact_name": "Amelia Grant",
+    "email": "amelia.grant@humelogistics.example",
+    "phone": "0400 111 020",
+    "location": "Melbourne VIC",
+    "stage": "Prospect",
+    "service": "Commercial Solar",
+    "status": "Open"
+  },
+  {
+    "id": "C002",
+    "company": "Hume Logistic",
+    "contact_name": "Amelia Grant",
+    "email": "a.grant@humelogistics.example",
+    "phone": null,
+    "location": "Melbourne VIC",
+    "stage": "Lead",
+    "service": "Solar",
+    "status": "New"
+  },
+  {
+    "id": "C003",
+    "company": "Greenfields Foods Pty Ltd",
+    "contact_name": "Rohan Lee",
+    "email": "rohan@greenfieldsfoods.example",
+    "phone": "0400 222 310",
+    "location": "Geelong VIC",
+    "stage": "Client",
+    "service": "Energy Efficiency",
+    "status": "Active"
+  },
+  {
+    "id": "C004",
+    "company": "Northbank College",
+    "contact_name": "Melissa Tran",
+    "email": "melissa.tran@northbankcollege.example",
+    "phone": "0400 330 110",
+    "location": "Sydney NSW",
+    "stage": "Prospect",
+    "service": "LED",
+    "status": "Open"
+  },
+  {
+    "id": "C005",
+    "company": "Solara Installations",
+    "contact_name": "Daniel Wu",
+    "email": "daniel@solarainstall.example",
+    "phone": "0400 880 101",
+    "location": "Sydney NSW",
+    "stage": "Partner",
+    "service": "Installation",
+    "status": "Active"
+  }
+]

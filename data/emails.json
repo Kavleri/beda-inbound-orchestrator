@@ -1,0 +1,98 @@
+[
+  {
+    "id": "E001",
+    "sender_email": "amelia.grant@humelogistics.example",
+    "sender_name": "Amelia Grant",
+    "subject": "Solar and battery across our three Victorian sites",
+    "body": "We operate warehouses in Truganina, Dandenong and Epping. Combined electricity consumption is about 2.1 GWh per year. We are considering solar, possibly batteries and lighting upgrades. We would like an initial discussion next week. I have attached the latest Truganina bill. Please call me on 0400 111 020.",
+    "attachments": ["01_hume_energy_bill.txt"]
+  },
+  {
+    "id": "E002",
+    "sender_email": "a.grant@humelogistics.example",
+    "sender_name": "Amelia",
+    "subject": "Website enquiry",
+    "body": "Company: Hume Logistic. We have three distribution sites in Melbourne and want a solar proposal. Consumption around two gigawatt hours annually. Contact Amelia. Best number 0400 111 020.",
+    "attachments": []
+  },
+  {
+    "id": "E003",
+    "sender_email": "rohan@greenfieldsfoods.example",
+    "sender_name": "Rohan Lee",
+    "subject": "Invoice 1847 does not match PO",
+    "body": "Hi, our accounts team says invoice 1847 is $2,640 higher than the purchase order. Can someone check before Friday please? This is for the lighting project already completed at Geelong.",
+    "attachments": ["03_greenfields_invoice_query.txt"]
+  },
+  {
+    "id": "E004",
+    "sender_email": "sales@megaleadlists.example",
+    "sender_name": "Sales Mega Leads",
+    "subject": "Buy 50,000 Australian CEO leads today",
+    "body": "Special price expires in 24 hours. Reply now for cryptocurrency payment instructions.",
+    "attachments": []
+  },
+  {
+    "id": "E005",
+    "sender_email": "melissa.tran@northbankcollege.example",
+    "sender_name": "Melissa Tran",
+    "subject": "Government school lighting upgrade",
+    "body": "I manage facilities at Northbank College. We have approximately 1,100 fluorescent fittings and want to understand whether an LED upgrade could access any government incentives. I do not have our latest electricity bill with me. Could someone tell me what you need from us?",
+    "attachments": ["02_northbank_site_notes.txt"]
+  },
+  {
+    "id": "E006",
+    "sender_email": "engineering@solarray.example",
+    "sender_name": "Engineering Team",
+    "subject": "Harmonics question on proposed battery inverter",
+    "body": "We are reviewing the PCS specification on a 500 kW battery project. Can your engineer confirm acceptable THD limits at the point of common coupling and whether the current design requires an additional harmonic study?",
+    "attachments": []
+  },
+  {
+    "id": "E007",
+    "sender_email": "priya.dev@examplemail.test",
+    "sender_name": "Priya Dev",
+    "subject": "Application for marketing internship",
+    "body": "I saw BEDA online and would love to apply for your marketing internship. My portfolio is attached.",
+    "attachments": ["portfolio.pdf"]
+  },
+  {
+    "id": "E008",
+    "sender_email": "daniel@solarainstall.example",
+    "sender_name": "Daniel Wu",
+    "subject": "Crew availability for Ballarat install",
+    "body": "We can hold a four person crew for the week beginning 14 September, but need confirmation by Tuesday. Is the Ballarat commercial solar project proceeding?",
+    "attachments": []
+  },
+  {
+    "id": "E009",
+    "sender_email": "facilities@harbourcoldstores.example",
+    "sender_name": "Sam",
+    "subject": "Electricity cost reduction",
+    "body": "We run a refrigerated warehouse in Newcastle. Bills are around $80,000 a month. Interested in solar and anything else that can reduce operating cost. I am the facilities manager, Sam. Mobile 0411 999 120.",
+    "attachments": []
+  },
+  {
+    "id": "E010",
+    "sender_email": "sam@harbourcoldstores.example",
+    "sender_name": "Sam",
+    "subject": "Re: enquiry from our website",
+    "body": "Just correcting my number from the web form. It is 0411 999 102, not 0411 999 120. Please use this email address going forward.",
+    "attachments": []
+  },
+  {
+    "id": "E011",
+    "sender_email": "alerts@beda.example",
+    "sender_name": "BEDA Alert System",
+    "subject": "CRM sync failed overnight",
+    "body": "HubSpot sync job failed at 02:14. Error: OAuth token expired. 146 records remain unsynchronised. Retry disabled after three failures.",
+    "attachments": []
+  },
+  {
+    "id": "E012",
+    "sender_email": "info@smallcafe.example",
+    "sender_name": "Small Cafe Info",
+    "subject": "Solar for cafe",
+    "body": "We lease a 70 square metre cafe and spend about $900 per month on electricity. Can you quote solar? Landlord has not yet agreed to roof works.",
+    "attachments": []
+  }
+]

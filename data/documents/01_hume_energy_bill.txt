@@ -1,0 +1,8 @@
+Customer: Hume Logistics Pty Ltd
+Site: Truganina Distribution Centre
+Billing period: 1 July to 31 July 2026
+Consumption: 68,420 kWh
+Maximum demand: 172 kW
+Total bill: $18,940
+NMI: 63051234567
+Account contact: Amelia Grant

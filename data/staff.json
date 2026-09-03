@@ -1,0 +1,30 @@
+[
+  {
+    "id": "STAFF_01",
+    "name": "Matt Cooper",
+    "role": "Founder",
+    "domains": ["commercial_sales", "strategic_partnerships", "large_enterprise"],
+    "email": "matt@wearebeda.com"
+  },
+  {
+    "id": "STAFF_02",
+    "name": "Ties Rahardjo",
+    "role": "Executive Operations Coordinator",
+    "domains": ["scheduling", "administration", "logistics", "general_operations", "partner_installations"],
+    "email": "ties@wearebeda.com"
+  },
+  {
+    "id": "STAFF_03",
+    "name": "Zidane Mouldino",
+    "role": "Marketing and Growth Coordinator",
+    "domains": ["marketing", "website", "inbound_growth", "internship_applications"],
+    "email": "zidane@wearebeda.com"
+  },
+  {
+    "id": "STAFF_04",
+    "name": "Ali Pratama",
+    "role": "Senior Business Analyst",
+    "domains": ["crm", "systems", "data", "workflows", "infrastructure_alerts", "billing_reconciliation"],
+    "email": "ali@wearebeda.com"
+  }
+]

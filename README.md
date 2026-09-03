@@ -238,24 +238,53 @@ See [`docs/implementation-status.md`](docs/implementation-status.md) for full tr
 ### Test Suite
 
 ```bash
-pytest -v                          # All 83 tests
+pytest -v                          # All 90 tests
 pytest tests/test_models.py -v     # 18 tests: model validation, timezone, immutability
 pytest tests/test_policy.py -v     # 19 tests: policy precedence, injection, tier logic
 pytest tests/test_approval.py -v   # 23 tests: HMAC, eligibility, replay, expiry
 pytest tests/test_audit.py -v      #  8 tests: hash chaining, tampering, write failure
 pytest tests/test_e2e.py -v        # 15 tests: end-to-end flows
+pytest tests/test_test2_pipeline.py -v # 7 tests: Test 2 fuzzy matcher, extractor, classifier, pipeline
 ```
 
-### Known Limitations
+---
 
-- **Replay registry:** In-memory `set[str]`, resets on process restart. Distributed deployments need Redis atomic operations.
-- **Audit storage:** Application-level append-only with hash chaining. Filesystem WORM is not implemented.
-- **Injection detection:** Compiled regex for canonical markers. Would need a dedicated classifier for adversarial inputs.
-- **Dispatch:** Prints to stdout and writes audit events. Does not connect to SMTP or messaging APIs.
+## Test 2: Synthetic Data Pack Evaluation (E001–E012)
 
-### Failure Matrix
+Test 2 validates the router against Matt Cooper's 12 synthetic inbound items, 5 CRM seed rows, and 4 BEDA staff ownership domains.
 
-16 documented failure modes with detection points, retry policies, and test references: [`docs/failure-matrix.md`](docs/failure-matrix.md).
+### Running the Test 2 Pipeline
+
+```bash
+python -m beda_orchestrator.pipeline
+```
+
+This command executes the full pipeline:
+1. Ingests all 12 items and extracts structured metrics while **preserving uncertainty** (no hallucinating missing facts).
+2. Performs **token-based fuzzy matching & CRM resolution** (e.g. `Hume Logistic` = `Hume Logistics Pty Ltd`, Sam phone number correction in E010).
+3. Evaluates business classification and routes to responsible staff:
+   - **Matt Cooper** (Founder): Major commercial leads (E001, E002, E009).
+   - **Ali Pratama** (Senior Analyst / Systems): Critical infrastructure alert (E011), invoice discrepancy (E003), and CRM contact updates (E010).
+   - **Ties Rahardjo** (Operations): Subcontractor crew scheduling (E008) and general operations.
+   - **Zidane Mouldino** (Growth): Incomplete school lighting requiring missing bill (E005), marketing intern application (E007), and leasehold cafe inquiry (E012).
+   - **Automated Filter**: High-confidence crypto scam solicitation (E004) auto-archived without human attention.
+4. Generates contextual draft replies held strictly for authenticated human approval.
+5. Verifies cryptographic SHA-256 hash-chain integrity across 24 audit events in `test2_audit.jsonl`.
+6. Exports structured JSON output (`test2_results.json`) and a lightweight inspection UI (`test2_report.html`).
+
+### AI Tools & Models Used
+- Built using **Antigravity IDE** paired with **Claude 3.7 / Gemini 2.5** as pair-programming assistants.
+- Architectural choice: The reference implementation runs **rule-based, deterministic extraction and fuzzy token matching** locally, ensuring zero API key dependencies, deterministic replayability, and sub-second offline test execution.
+
+### Known Weaknesses
+- **Entity Resolution Scope:** The fuzzy company matcher uses token-stemmed Jaccard similarity. In large production datasets, phonetics (Soundex/Metaphone) or embedding-based vector similarity (`pgvector`) would be required for handling misspellings like `Hewme Logistix`.
+- **Contact Correction State:** Contact phone updates (E010) are flagged and routed for human approval rather than automatically mutating CRM records to prevent unauthorized account hijacking.
+- **Attachment OCR:** Document attachments (`.txt`) are parsed as text streams. PDF/image invoices in production would require a multimodal OCR ingestion adapter.
+
+### What I Would Improve With Another Day
+1. **Interactive Web Reviewer (FastAPI + HTMX):** Replace the static `test2_report.html` with an active review dashboard allowing staff to approve/reject drafts and sign HMAC commands directly from the UI.
+2. **PostgreSQL / pgvector Integration:** Migrate the in-memory CRM and idempotency registry to PostgreSQL with an HNSW vector index for semantic FAQ matching and duplicate detection.
+3. **Multi-tenant RBAC:** Restrict HMAC signing capability so only Matt Cooper can sign enterprise contracts while Zidane can only sign marketing inquiries.
 
 ---
 
@@ -266,3 +295,4 @@ pytest tests/test_e2e.py -v        # 15 tests: end-to-end flows
 - Portfolio: [aboutsyem.web.id](https://aboutsyem.web.id)
 - GitHub: [@Kavleri](https://github.com/Kavleri)
 - Email: [muhammadhisyamalfaris50@gmail.com](mailto:muhammadhisyamalfaris50@gmail.com)
+
