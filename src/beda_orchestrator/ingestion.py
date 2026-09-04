@@ -18,12 +18,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .models import InboundEnvelope
+
+ADVERSARIAL_DIRECTIVES_PATTERN = re.compile(
+    r"(ignore\s+(previous|all|prior|system)\s+(rules|instructions|constraints)"
+    r"|expose\s+internal\s+staff"
+    r"|dump\s+(all\s+)?staff"
+    r"|approve\s+(and\s+send|this\s+email|response|outbound)"
+    r"|system\s*override"
+    r"|admin\s*override"
+    r"|set\s+approval_state"
+    r"|bypass\s+(human\s+)?approval"
+    r"|grant\s+tool\s+permission)",
+    re.IGNORECASE,
+)
 
 
 class AttachmentMetadata(BaseModel):
@@ -36,6 +50,9 @@ class AttachmentMetadata(BaseModel):
     content: str | None = None
     is_loaded: bool = False
     warning: str | None = None
+    is_untrusted_document: bool = True
+    has_adversarial_directives: bool = False
+    adversarial_matches: list[str] = Field(default_factory=list)
 
 
 class StaffMember(BaseModel):
@@ -101,7 +118,7 @@ def get_default_data_dir() -> Path:
 
 def load_attachments(attachments_dir: Path | None = None) -> dict[str, str]:
     """
-    Load all text attachments from the attachments directory into a dict of {filename: content}.
+    Load all attachments (.txt and .pdf) from the attachments directory into a dict of {filename: content}.
     """
     if attachments_dir is None:
         attachments_dir = get_default_data_dir() / "attachments"
@@ -110,13 +127,24 @@ def load_attachments(attachments_dir: Path | None = None) -> dict[str, str]:
     if not attachments_dir.exists():
         return attachments
 
-    for path in attachments_dir.glob("*.txt"):
-        try:
-            content = path.read_text(encoding="utf-8").strip()
-            attachments[path.name] = content
-        except OSError:
-            # Record empty string on read failure; build_inbound_item will handle warning
-            attachments[path.name] = ""
+    for path in attachments_dir.iterdir():
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix == ".txt":
+            try:
+                content = path.read_text(encoding="utf-8").strip()
+                attachments[path.name] = content
+            except OSError:
+                attachments[path.name] = ""
+        elif suffix == ".pdf":
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(str(path))
+                text_pages = [page.extract_text() or "" for page in reader.pages]
+                attachments[path.name] = "\n".join(text_pages).strip()
+            except (pypdf.errors.PyPdfError, OSError, ValueError, KeyError, IndexError):
+                attachments[path.name] = ""
     return attachments
 
 
@@ -201,12 +229,22 @@ def build_inbound_item(
         if ref_str in loaded_attachments:
             text = loaded_attachments[ref_str]
             att_path = str(attachments_dir / ref_str) if attachments_dir else ref_str
+            adv_matches = ADVERSARIAL_DIRECTIVES_PATTERN.findall(text) if text else []
+            has_adv = bool(adv_matches)
+            if has_adv:
+                warnings.append(
+                    f"Untrusted document '{ref_str}' contains adversarial instruction directives; "
+                    "isolated at trust boundary and treated strictly as passive data."
+                )
             attachments.append(AttachmentMetadata(
                 filename=ref_str,
                 filepath=att_path,
                 content=text,
                 is_loaded=True,
                 warning=None,
+                is_untrusted_document=True,
+                has_adversarial_directives=has_adv,
+                adversarial_matches=[m[0] if isinstance(m, tuple) else m for m in adv_matches],
             ))
         else:
             warn = f"Referenced attachment {ref_str!r} not found in attachments directory"
@@ -217,6 +255,9 @@ def build_inbound_item(
                 content=None,
                 is_loaded=False,
                 warning=warn,
+                is_untrusted_document=True,
+                has_adversarial_directives=False,
+                adversarial_matches=[],
             ))
 
     return InboundItem(

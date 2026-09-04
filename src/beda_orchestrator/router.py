@@ -118,6 +118,31 @@ def route_inbound_inquiry(
 
     cat = classification.category if isinstance(classification, ClassificationResult) else classification
 
+    # Security Invariant: Adversarial Document / Untrusted Control Directive
+    has_adversarial = False
+    if hasattr(extracted, "has_adversarial_directives") and extracted.has_adversarial_directives or isinstance(extracted, dict) and extracted.get("has_adversarial_directives"):
+        has_adversarial = True
+
+    if has_adversarial:
+        devops_owners = _resolve_staff_by_domain(["infrastructure_alerts", "systems"], staff_directory)
+        return RoutingResult(
+            assigned_owners=devops_owners,
+            priority="CRITICAL",
+            action_type=ActionType.QUARANTINE,
+            recommended_action=(
+                "RECOMMENDATION: Quarantine item for security review. Untrusted document attachment contains "
+                "adversarial prompt injection directives attempting policy override or data exfiltration. "
+                "Outbound actions, tool permissions, and automated approval are strictly suppressed."
+            ),
+            is_externally_consequential=False,
+            requires_human_approval=True,
+            reason_evidence=(
+                "Adversarial prompt injection detected in untrusted document attachment; "
+                "isolated at trust boundary without granting policy or tool overrides."
+            ),
+            target_queue="security_quarantine",
+        )
+
     # 1. Spam Solicitation -> Automated Archive
     if cat in (BusinessCategory.SPAM_SOLICITATION, "SPAM_SOLICITATION"):
         return RoutingResult(

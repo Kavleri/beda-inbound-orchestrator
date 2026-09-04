@@ -18,6 +18,7 @@ from typing import Any
 
 from .classifier import BusinessCategory, ClassificationResult
 from .extractor import StructuredExtraction
+from .router import ActionType
 
 
 def generate_draft_response(
@@ -31,6 +32,18 @@ def generate_draft_response(
     Does NOT branch on email IDs; composes responses based on structured facts and category.
     """
     cat = classification.category if isinstance(classification, ClassificationResult) else classification
+
+    # Case 0: Adversarial document / Quarantine -> strictly suppress outbound draft
+    if (
+        getattr(routing, "action_type", None) == ActionType.QUARANTINE
+        or getattr(extracted, "has_adversarial_directives", False)
+        or (isinstance(extracted, dict) and extracted.get("has_adversarial_directives"))
+    ):
+        return (
+            "[NO OUTBOUND DRAFT — ADVERSARIAL DOCUMENT QUARANTINED FOR SECURITY REVIEW]\n"
+            "Alert: Inbound attachment contains unauthorized control directives attempting policy override or data exfiltration. "
+            "Outbound communications and tool permissions are strictly suppressed."
+        )
 
     # Case 1: Spam solicitation -> strictly no draft
     if cat in (BusinessCategory.SPAM_SOLICITATION, "SPAM_SOLICITATION"):

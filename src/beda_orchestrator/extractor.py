@@ -19,6 +19,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .ingestion import ADVERSARIAL_DIRECTIVES_PATTERN
+
 
 class ProvenanceField(BaseModel):
     """An extracted field preserving value, original text, and provenance source."""
@@ -54,6 +56,8 @@ class StructuredExtraction(BaseModel):
     attachment_references: list[str] = Field(default_factory=list)
     is_spam: bool = False
     is_system_alert: bool = False
+    has_adversarial_directives: bool = False
+    adversarial_details: list[str] = Field(default_factory=list)
 
     def to_legacy_dict(self) -> dict[str, Any]:
         """Convert to dictionary matching the legacy extractor signature."""
@@ -73,6 +77,8 @@ class StructuredExtraction(BaseModel):
             "uncertainties": list(self.uncertainties),
             "is_spam": self.is_spam,
             "is_system_alert": self.is_system_alert,
+            "has_adversarial_directives": self.has_adversarial_directives,
+            "adversarial_details": list(self.adversarial_details),
         }
 
 
@@ -118,6 +124,29 @@ def extract_from_inbound_item(item: Any) -> StructuredExtraction:
 
     full_email_text = f"{subject}\n{body}"
     full_corpus = f"{full_email_text}\n{attachments_text}"
+
+    missing_prerequisites: list[str] = []
+    uncertainties: list[str] = []
+
+    # Check for adversarial directives in attachments
+    has_adversarial = False
+    adv_details: list[str] = []
+    if hasattr(item, "attachments"):
+        for att in getattr(item, "attachments", []):
+            if getattr(att, "has_adversarial_directives", False):
+                has_adversarial = True
+                adv_details.extend(getattr(att, "adversarial_matches", []))
+    if not has_adversarial and attachments_text:
+        adv_matches = ADVERSARIAL_DIRECTIVES_PATTERN.findall(attachments_text)
+        if adv_matches:
+            has_adversarial = True
+            adv_details.extend([m[0] if isinstance(m, tuple) else m for m in adv_matches])
+
+    if has_adversarial:
+        uncertainties.append(
+            "Adversarial instruction directives detected in untrusted document attachment; "
+            "directives isolated at trust boundary and rejected from control plane."
+        )
 
     # 1. Spam signals
     is_spam = bool(re.search(
@@ -356,9 +385,6 @@ def extract_from_inbound_item(item: Any) -> StructuredExtraction:
             ))
 
     # 12. Missing Prerequisites and Uncertainty Tracking (Preserve, Do Not Invent)
-    missing_prerequisites: list[str] = []
-    uncertainties: list[str] = []
-
     # Missing electric bill check
     if re.search(r"(do not have our latest electricity bill|No electricity invoice supplied)", full_corpus, re.IGNORECASE):
         missing_prerequisites.append("electricity_bill")
@@ -399,6 +425,8 @@ def extract_from_inbound_item(item: Any) -> StructuredExtraction:
         attachment_references=[str(r) for r in att_refs],
         is_spam=is_spam,
         is_system_alert=is_system_alert,
+        has_adversarial_directives=has_adversarial,
+        adversarial_details=adv_details,
     )
 
 
